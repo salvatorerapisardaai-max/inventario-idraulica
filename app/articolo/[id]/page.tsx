@@ -39,7 +39,7 @@ export default function ArticoloPage({ params }: { params: { id: string } }) {
         .eq('id', params.id)
         .single()
       if (error || !data) setNotFound(true)
-      else setArticolo(data as Articolo)
+      else setArticolo(data as unknown as Articolo) 
       setLoading(false)
     }
     fetchArticolo()
