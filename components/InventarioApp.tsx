@@ -1,5 +1,5 @@
 'use client'
-
+import { QRModal } from './QRModal'
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
