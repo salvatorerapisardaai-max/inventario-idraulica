@@ -9,16 +9,9 @@ const supabase = createClient(
 )
 
 type Articolo = {
-  id: string
-  nome: string
-  codice?: string
-  categoria?: string
-  descrizione?: string
-  utilizzo?: string
-  foto_url?: string
-  prezzo_vendita?: number
-  quantita: number
-  soglia_riordino: number
+  id: string; nome: string; codice?: string; categoria?: string
+  descrizione?: string; utilizzo?: string; foto_url?: string
+  prezzo_vendita?: number; quantita: number; soglia_riordino: number
   posizione?: string
   fornitori?: { nome: string } | null
   zone?: { codice: string; nome: string } | null
@@ -39,7 +32,7 @@ export default function ArticoloPage({ params }: { params: { id: string } }) {
         .eq('id', params.id)
         .single()
       if (error || !data) setNotFound(true)
-      else setArticolo(data as unknown as Articolo) 
+      else setArticolo(data as unknown as Articolo)
       setLoading(false)
     }
     fetchArticolo()
@@ -49,7 +42,7 @@ export default function ArticoloPage({ params }: { params: { id: string } }) {
   const esaurito = articolo && articolo.quantita === 0
 
   if (loading) return (
-    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#0f0f0f' }}>
+    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0f0f0f' }}>
       <p style={{ color:'#888' }}>Caricamento…</p>
     </div>
   )
@@ -86,19 +79,11 @@ export default function ArticoloPage({ params }: { params: { id: string } }) {
         )}
         <h1 style={{ color:'#fff', fontSize:22, fontWeight:700, margin:'0 0 6px', lineHeight:1.3 }}>{articolo.nome}</h1>
         {articolo.codice && <p style={{ color:'#666', fontSize:12, margin:'0 0 16px', fontFamily:'monospace' }}>Codice: {articolo.codice}</p>}
-
-        <div style={{
-          display:'inline-flex', alignItems:'center', padding:'6px 14px', borderRadius:8, border:'1px solid',
-          fontSize:14, fontWeight:600, marginBottom:16,
-          background: esaurito ? '#3d1515' : disponibile ? '#0f2d1f' : '#2d1f0f',
-          borderColor: esaurito ? '#e05252' : disponibile ? '#22c55e' : '#f59e0b',
-          color: esaurito ? '#e05252' : disponibile ? '#22c55e' : '#f59e0b',
-        }}>
-          {esaurito ? '❌ Esaurito' : disponibile ? '✅ Disponibile' : '⚠️ Scorte limitate'}
+        <div style={{ display:'inline-flex', alignItems:'center', padding:'6px 14px', borderRadius:8, border:'1px solid', fontSize:14, fontWeight:600, marginBottom:16, background:esaurito?'#3d1515':disponibile?'#0f2d1f':'#2d1f0f', borderColor:esaurito?'#e05252':disponibile?'#22c55e':'#f59e0b', color:esaurito?'#e05252':disponibile?'#22c55e':'#f59e0b' }}>
+          {esaurito?'❌ Esaurito':disponibile?'✅ Disponibile':'⚠️ Scorte limitate'}
           {!esaurito && <span style={{ marginLeft:8, opacity:0.7, fontSize:12 }}>({articolo.quantita} pz)</span>}
         </div>
-
-        {articolo.prezzo_vendita && articolo.prezzo_vendita > 0 && (
+        {articolo.prezzo_vendita && articolo.prezzo_vendita>0 && (
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', paddingTop:16, borderTop:'1px solid #2a2a2a' }}>
             <span style={{ color:'#888', fontSize:13 }}>Prezzo</span>
             <span style={{ color:'#fff', fontSize:24, fontWeight:700 }}>€ {Number(articolo.prezzo_vendita).toFixed(2)}</span>
@@ -108,19 +93,19 @@ export default function ArticoloPage({ params }: { params: { id: string } }) {
 
       <div style={{ margin:'12px 16px 0', background:'#1a1a1a', borderRadius:12, padding:20, border:'1px solid #2a2a2a' }}>
         {articolo.descrizione && (
-          <div style={{ marginBottom:16 }}>
+          <div style={{ marginBottom:14 }}>
             <span style={{ display:'block', fontSize:11, color:'#666', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:4 }}>📋 Descrizione</span>
             <p style={{ color:'#ccc', fontSize:14, margin:0, lineHeight:1.5 }}>{articolo.descrizione}</p>
           </div>
         )}
         {articolo.utilizzo && (
-          <div style={{ marginBottom:16 }}>
+          <div style={{ marginBottom:14 }}>
             <span style={{ display:'block', fontSize:11, color:'#666', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:4 }}>🔩 Utilizzo</span>
             <p style={{ color:'#ccc', fontSize:14, margin:0, lineHeight:1.5 }}>{articolo.utilizzo}</p>
           </div>
         )}
         {(articolo.zone || articolo.posizione) && (
-          <div style={{ marginBottom:16 }}>
+          <div style={{ marginBottom:14 }}>
             <span style={{ display:'block', fontSize:11, color:'#666', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:4 }}>📍 Posizione</span>
             <p style={{ color:'#ccc', fontSize:14, margin:0 }}>
               {articolo.zone ? `${articolo.zone.codice} — ${articolo.zone.nome}` : articolo.posizione}
@@ -140,4 +125,4 @@ export default function ArticoloPage({ params }: { params: { id: string } }) {
       </p>
     </div>
   )
-  }
+}
