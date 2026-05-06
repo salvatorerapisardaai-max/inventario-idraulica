@@ -92,7 +92,6 @@ const labelStyle: React.CSSProperties = {
 }
 
 // ─── Helper: sanitizza form per Supabase ─────────────────────────
-// Converte stringhe vuote in null per colonne UUID e numeriche
 function sanitize(form: Record<string, any>) {
   const uuidFields = ['fornitore_id', 'zona_id']
   const numFields = ['prezzo_acquisto', 'prezzo_vendita', 'quantita', 'soglia_riordino']
@@ -265,6 +264,7 @@ function TabInventario({ articoli, fornitori, zone, onReload }: {
 }) {
   const [cerca, setCerca] = useState('')
   const [selected, setSelected] = useState<Articolo | null>(null)
+  const [qrArticolo, setQrArticolo] = useState<Articolo | null>(null)  // ← QR STATE
 
   const filtrati = articoli.filter(a =>
     a.nome.toLowerCase().includes(cerca.toLowerCase()) ||
@@ -301,42 +301,63 @@ function TabInventario({ articoli, fornitori, zone, onReload }: {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           {filtrati.map(a => (
-            <div key={a.id} onClick={() => setSelected(a)} style={{
+            <div key={a.id} style={{
               background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6,
-              padding: '12px 16px', cursor: 'pointer', display: 'flex',
+              padding: '12px 16px', display: 'flex',
               alignItems: 'center', gap: 12, transition: 'border-color 0.15s',
-            }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = C.accent)}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = C.border)}
-            >
-              {a.foto_url && (
-                <img src={a.foto_url} alt="" style={{ width: 44, height: 44, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-              )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{a.nome}</div>
-                <div style={{ fontSize: 11, color: C.muted, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {a.categoria && <span>{a.categoria}</span>}
-                  {a.codice && <span>#{a.codice}</span>}
-                  {(a as any).fornitori?.nome && <span>{(a as any).fornitori.nome}</span>}
+            }}>
+              {/* Foto — cliccabile per aprire dettaglio */}
+              <div onClick={() => setSelected(a)} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.parentElement!.style.borderColor = C.accent)}
+                onMouseLeave={e => (e.currentTarget.parentElement!.style.borderColor = C.border)}
+              >
+                {a.foto_url && (
+                  <img src={a.foto_url} alt="" style={{ width: 44, height: 44, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{a.nome}</div>
+                  <div style={{ fontSize: 11, color: C.muted, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {a.categoria && <span>{a.categoria}</span>}
+                    {a.codice && <span>#{a.codice}</span>}
+                    {(a as any).fornitori?.nome && <span>{(a as any).fornitori.nome}</span>}
+                  </div>
                 </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <span style={badge(a.quantita, a.soglia_riordino)}>{a.quantita} pz {a.quantita <= a.soglia_riordino ? '⚠' : ''}</span>
+                  {a.prezzo_vendita ? (
+                    <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>€ {Number(a.prezzo_vendita).toFixed(2)}</div>
+                  ) : null}
+                </div>
+                <span style={{ color: C.dim, fontSize: 18 }}>›</span>
               </div>
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <span style={badge(a.quantita, a.soglia_riordino)}>{a.quantita} pz {a.quantita <= a.soglia_riordino ? '⚠' : ''}</span>
-                {a.prezzo_vendita ? (
-                  <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>€ {Number(a.prezzo_vendita).toFixed(2)}</div>
-                ) : null}
-              </div>
-              <span style={{ color: C.dim, fontSize: 18 }}>›</span>
+
+              {/* ← BOTTONE QR */}
+              <button
+                onClick={e => { e.stopPropagation(); setQrArticolo(a) }}
+                title="Genera QR Code"
+                style={{
+                  padding: '5px 10px', background: C.accentSoft, color: C.accent,
+                  border: `1px solid #2a4a7f`, borderRadius: 5,
+                  fontSize: 12, cursor: 'pointer', flexShrink: 0,
+                }}
+              >
+                📱 QR
+              </button>
             </div>
           ))}
         </div>
+      )}
+
+      {/* ← QR MODAL */}
+      {qrArticolo && (
+        <QRModal articolo={qrArticolo} onClose={() => setQrArticolo(null)} />
       )}
     </div>
   )
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ARTICOLO DETAIL + EDIT (CON FIX UUID)
+// ARTICOLO DETAIL + EDIT
 // ═══════════════════════════════════════════════════════════════════
 function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: {
   item: Articolo
@@ -364,7 +385,6 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: {
   })
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
-  // ✅ FIX: sanitize() converte "" → null per campi UUID e numerici
   const salva = async () => {
     if (!form.nome) return
     setSaving(true)
@@ -394,7 +414,6 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: {
 
   return (
     <div>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
         <button onClick={onClose} style={{ ...btnSecondary, padding: '8px 12px' }}>← Indietro</button>
         <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, flex: 1 }}>{item.nome}</h2>
@@ -404,17 +423,14 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: {
       </div>
 
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-        {/* Foto */}
         {item.foto_url && (
           <div style={{ flexShrink: 0 }}>
             <img src={item.foto_url} alt={item.nome} style={{ width: 180, height: 180, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.border}` }} />
           </div>
         )}
 
-        {/* Contenuto */}
         <div style={{ flex: 1, minWidth: 300 }}>
           {editMode ? (
-            /* ── EDIT MODE ── */
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', gap: 10 }}>
                 <Field label="Nome *" flex={3}>
@@ -457,18 +473,24 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: {
               </Field>
 
               <div style={{ display: 'flex', gap: 10 }}>
-                <Field label="Quantità">
-                  <input type="number" min="0" value={form.quantita} onChange={e => set('quantita', e.target.value)} style={inp} />
-                </Field>
-                <Field label="Soglia riordino">
-                  <input type="number" min="0" value={form.soglia_riordino} onChange={e => set('soglia_riordino', e.target.value)} style={inp} />
-                </Field>
-                <Field label="€ Acquisto">
-                  <input type="number" step="0.01" min="0" value={form.prezzo_acquisto} onChange={e => set('prezzo_acquisto', e.target.value)} style={inp} />
-                </Field>
-                <Field label="€ Vendita">
-                  <input type="number" step="0.01" min="0" value={form.prezzo_vendita} onChange={e => set('prezzo_vendita', e.target.value)} style={inp} />
-                </Field>
+                {[
+                  ['Quantità', 'quantita', '0', 'number', '1'],
+                  ['Soglia riordino', 'soglia_riordino', '1', 'number', '1'],
+                  ['€ Acquisto', 'prezzo_acquisto', '0.00', 'number', '0.01'],
+                  ['€ Vendita', 'prezzo_vendita', '0.00', 'number', '0.01'],
+                ].map(([label, key, placeholder, type, step]) => (
+                  <Field key={key} label={label}>
+                    <input
+                      type={type}
+                      step={step}
+                      min="0"
+                      value={form[key as keyof typeof form]}
+                      onChange={e => set(key, e.target.value)}
+                      placeholder={placeholder}
+                      style={inp}
+                    />
+                  </Field>
+                ))}
               </div>
 
               <Field label="Note">
@@ -488,7 +510,6 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: {
               </div>
             </div>
           ) : (
-            /* ── VIEW MODE ── */
             <div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
                 {[
@@ -511,7 +532,6 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: {
                 ))}
               </div>
 
-              {/* Stock */}
               <div style={{
                 background: C.surfaceHi, border: `1px solid ${C.border}`, borderRadius: 6,
                 padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -600,15 +620,10 @@ function TabAggiungi({ fornitori, zone, onSaved }: {
   const salva = async () => {
     if (!form.nome) return
     setSaving(true)
-
-    // ✅ FIX: sanitize() converte "" → null per UUID e numeri
     const payload = {
       ...sanitize(form),
-      foto_url: fotoB64
-        ? `data:${mediaType};base64,${fotoB64}`
-        : null,
+      foto_url: fotoB64 ? `data:${mediaType};base64,${fotoB64}` : null,
     }
-
     const { error } = await supabase.from('articoli').insert(payload)
     if (error) {
       console.error('Errore inserimento:', error)
@@ -616,7 +631,6 @@ function TabAggiungi({ fornitori, zone, onSaved }: {
       setSaving(false)
       return
     }
-
     setForm({ nome: '', codice: '', categoria: '', descrizione: '', utilizzo: '', zona_id: '', posizione: '', fornitore_id: '', prezzo_acquisto: '', prezzo_vendita: '', quantita: '0', soglia_riordino: '1', note: '' })
     setFoto(null); setFotoB64(null); setAiNote(null)
     setSaving(false)
@@ -625,7 +639,6 @@ function TabAggiungi({ fornitori, zone, onSaved }: {
 
   return (
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-      {/* Colonna foto */}
       <div style={{ width: 220, flexShrink: 0 }}>
         <div
           onClick={() => fileRef.current?.click()}
@@ -635,7 +648,6 @@ function TabAggiungi({ fornitori, zone, onSaved }: {
             width: 220, height: 220, border: `2px dashed ${C.border}`, borderRadius: 8,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer', overflow: 'hidden', background: C.surface,
-            transition: 'border-color 0.15s',
           }}
           onMouseEnter={e => (e.currentTarget.style.borderColor = C.accent)}
           onMouseLeave={e => (e.currentTarget.style.borderColor = C.border)}
@@ -669,7 +681,6 @@ function TabAggiungi({ fornitori, zone, onSaved }: {
         )}
       </div>
 
-      {/* Colonna form */}
       <div style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', gap: 10 }}>
           <Field label="Nome *" flex={3}>
@@ -774,7 +785,6 @@ function TabFornitori({ fornitori, onReload }: { fornitori: Fornitore[]; onReloa
 
   return (
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-      {/* Lista */}
       <div style={{ flex: 1, minWidth: 280 }}>
         <div style={labelStyle}>FORNITORI ({fornitori.length})</div>
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -797,7 +807,6 @@ function TabFornitori({ fornitori, onReload }: { fornitori: Fornitore[]; onReloa
         </div>
       </div>
 
-      {/* Form nuovo */}
       <div style={{ width: 300, flexShrink: 0 }}>
         <div style={labelStyle}>NUOVO FORNITORE</div>
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
