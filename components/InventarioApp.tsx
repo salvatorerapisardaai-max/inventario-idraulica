@@ -855,6 +855,7 @@ function TabInventario({ articoli, fornitori, zone, onReload }: { articoli:Artic
   const [cerca, setCerca] = useState('')
   const [selected, setSelected] = useState<Articolo|null>(null)
   const [qrArticolo, setQrArticolo] = useState<Articolo|null>(null)
+  const [quickEditId, setQuickEditId] = useState<string|null>(null)
 
   const filtrati = articoli.filter(a=>
     a.nome.toLowerCase().includes(cerca.toLowerCase()) ||
@@ -874,32 +875,111 @@ function TabInventario({ articoli, fornitori, zone, onReload }: { articoli:Artic
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
           {filtrati.map(a=>(
-            <div key={a.id} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:'10px 12px', display:'flex', alignItems:'center', gap:10 }}
-              onMouseEnter={e=>e.currentTarget.style.borderColor=C.accent}
-              onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}
-            >
-              <div onClick={()=>setSelected(a)} style={{ display:'flex', alignItems:'center', gap:10, flex:1, cursor:'pointer' }}>
-                {a.foto_url && <img src={a.foto_url} alt="" style={{ width:40, height:40, borderRadius:4, objectFit:'cover', flexShrink:0 }} />}
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:14, fontWeight:600, marginBottom:2 }}>{a.nome}</div>
-                  <div style={{ fontSize:11, color:C.muted, display:'flex', gap:8, flexWrap:'wrap' }}>
-                    {a.categoria && <span>{a.categoria}</span>}
-                    {a.codice && <span>#{a.codice}</span>}
-                    {(a as any).fornitori?.nome && <span>{(a as any).fornitori.nome}</span>}
+            <div key={a.id} style={{ background:C.surface, border:`1px solid ${quickEditId===a.id?C.accent:C.border}`, borderRadius:6, overflow:'hidden' }}>
+              <div style={{ padding:'10px 12px', display:'flex', alignItems:'center', gap:8 }}
+                onMouseEnter={e=>{ if(quickEditId!==a.id) e.currentTarget.parentElement!.style.borderColor=C.accent }}
+                onMouseLeave={e=>{ if(quickEditId!==a.id) e.currentTarget.parentElement!.style.borderColor=C.border }}
+              >
+                <div onClick={()=>setSelected(a)} style={{ display:'flex', alignItems:'center', gap:10, flex:1, cursor:'pointer', minWidth:0 }}>
+                  {a.foto_url && <img src={a.foto_url} alt="" style={{ width:40, height:40, borderRadius:4, objectFit:'cover', flexShrink:0 }} />}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:14, fontWeight:600, marginBottom:2 }}>{a.nome}</div>
+                    <div style={{ fontSize:11, color:C.muted, display:'flex', gap:8, flexWrap:'wrap' }}>
+                      {a.categoria && <span>{a.categoria}</span>}
+                      {a.codice && <span>#{a.codice}</span>}
+                      {(a as any).fornitori?.nome && <span>{(a as any).fornitori.nome}</span>}
+                    </div>
                   </div>
+                  <div style={{ textAlign:'right', flexShrink:0 }}>
+                    <span style={badge(a.quantita,a.soglia_riordino)}>{a.quantita} pz {a.quantita<=a.soglia_riordino?'⚠':''}</span>
+                    {a.prezzo_vendita ? <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>€{Number(a.prezzo_vendita).toFixed(2)}</div> : null}
+                  </div>
+                  <span style={{ color:C.dim, fontSize:18 }}>›</span>
                 </div>
-                <div style={{ textAlign:'right', flexShrink:0 }}>
-                  <span style={badge(a.quantita,a.soglia_riordino)}>{a.quantita} pz {a.quantita<=a.soglia_riordino?'⚠':''}</span>
-                  {a.prezzo_vendita ? <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>€{Number(a.prezzo_vendita).toFixed(2)}</div> : null}
-                </div>
-                <span style={{ color:C.dim, fontSize:18 }}>›</span>
+                <button title="Modifica rapida" onClick={e=>{ e.stopPropagation(); setQuickEditId(quickEditId===a.id?null:a.id) }}
+                  style={{ padding:'4px 9px', background:quickEditId===a.id?C.accent:C.accentSoft, color:quickEditId===a.id?'#fff':C.accent, border:`1px solid ${quickEditId===a.id?C.accent:'#2a4a7f'}`, borderRadius:5, fontSize:13, cursor:'pointer', flexShrink:0 }}>✎</button>
+                <button title="QR code" onClick={e=>{ e.stopPropagation(); setQrArticolo(a) }} style={{ padding:'4px 9px', background:C.accentSoft, color:C.accent, border:`1px solid #2a4a7f`, borderRadius:5, fontSize:11, cursor:'pointer', flexShrink:0 }}>📱</button>
               </div>
-              <button onClick={e=>{ e.stopPropagation(); setQrArticolo(a) }} style={{ padding:'4px 9px', background:C.accentSoft, color:C.accent, border:`1px solid #2a4a7f`, borderRadius:5, fontSize:11, cursor:'pointer', flexShrink:0 }}>📱</button>
+              {quickEditId===a.id && <QuickEdit articolo={a} onClose={()=>setQuickEditId(null)} onSaved={()=>{ setQuickEditId(null); onReload() }} />}
             </div>
           ))}
         </div>
       )}
       {qrArticolo && <QRModal articolo={qrArticolo} onClose={()=>setQrArticolo(null)} />}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// QUICK EDIT — modifica rapida di quantità + prezzo vendita
+// ═══════════════════════════════════════════════════════════════════
+function QuickEdit({ articolo, onClose, onSaved }: { articolo:Articolo; onClose:()=>void; onSaved:()=>void }) {
+  const [qty, setQty] = useState(String(articolo.quantita))
+  const [prezzo, setPrezzo] = useState(String(articolo.prezzo_vendita ?? ''))
+  const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState<string|null>(null)
+
+  const numQty = Number(qty)
+  const numPrezzo = prezzo === '' ? null : Number(prezzo)
+  const valid = !isNaN(numQty) && numQty >= 0 && (numPrezzo === null || (!isNaN(numPrezzo) && numPrezzo >= 0))
+  const dirty = numQty !== articolo.quantita || numPrezzo !== (articolo.prezzo_vendita ?? null)
+
+  const salva = async () => {
+    if (!valid || !dirty) return
+    setSaving(true); setFeedback(null)
+
+    const updates: any = {}
+    if (numQty !== articolo.quantita) updates.quantita = numQty
+    if (numPrezzo !== (articolo.prezzo_vendita ?? null)) updates.prezzo_vendita = numPrezzo
+
+    const { error } = await supabase.from('articoli').update(updates).eq('id', articolo.id)
+    if (error) { setFeedback(`Errore: ${error.message}`); setSaving(false); return }
+
+    // Audit trail: registra movimento se cambia la quantità
+    if (numQty !== articolo.quantita) {
+      const diff = numQty - articolo.quantita
+      await supabase.from('movimenti').insert({
+        articolo_id: articolo.id,
+        tipo: diff > 0 ? 'entrata' : 'uscita',
+        quantita: Math.abs(diff),
+        quantita_precedente: articolo.quantita,
+        quantita_dopo: numQty,
+        note: 'Modifica rapida',
+      })
+    }
+    setSaving(false); onSaved()
+  }
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') salva()
+    if (e.key === 'Escape') onClose()
+  }
+
+  return (
+    <div style={{ borderTop:`1px solid ${C.border}`, background:C.surfaceHi, padding:'12px 14px', display:'flex', gap:10, alignItems:'flex-end', flexWrap:'wrap' }} onKeyDown={handleKey}>
+      <Field label="Quantità" flex={1}>
+        <div style={{ display:'flex', gap:4 }}>
+          <button onClick={()=>setQty(String(Math.max(0, numQty-1)))} style={{ width:32, height:34, background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.text, cursor:'pointer', fontSize:16, fontFamily:'inherit' }}>−</button>
+          <input type="number" inputMode="numeric" min="0" value={qty} onChange={e=>setQty(e.target.value)} style={{ ...inp, textAlign:'center', minWidth:60 }} />
+          <button onClick={()=>setQty(String(numQty+1))} style={{ width:32, height:34, background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.text, cursor:'pointer', fontSize:16, fontFamily:'inherit' }}>+</button>
+        </div>
+      </Field>
+      <Field label="€ Vendita" flex={1}>
+        <input type="number" inputMode="decimal" step="0.01" min="0" value={prezzo} onChange={e=>setPrezzo(e.target.value)} placeholder="0.00" style={inp} />
+      </Field>
+      <div style={{ display:'flex', gap:6 }}>
+        <button onClick={salva} disabled={!valid||!dirty||saving} style={{ ...btnPrimary, opacity:!valid||!dirty||saving?0.4:1, padding:'9px 16px', background:C.green, display:'flex', alignItems:'center', gap:6 }}>
+          {saving ? <Spinner /> : '✓ Salva'}
+        </button>
+        <button onClick={onClose} style={{ ...btnSecondary, padding:'9px 14px' }}>Annulla</button>
+      </div>
+      {feedback && <div style={{ width:'100%', color:C.red, fontSize:11, marginTop:4 }}>{feedback}</div>}
+      {!feedback && dirty && (
+        <div style={{ width:'100%', fontSize:11, color:C.muted, marginTop:2 }}>
+          {numQty !== articolo.quantita && <span>Quantità: {articolo.quantita} → <strong style={{color:numQty>articolo.quantita?C.green:C.orange}}>{numQty}</strong> ({numQty>articolo.quantita?'+':''}{numQty-articolo.quantita}) </span>}
+          {numPrezzo !== (articolo.prezzo_vendita ?? null) && <span>· Prezzo: €{Number(articolo.prezzo_vendita||0).toFixed(2)} → <strong style={{color:C.accent}}>€{(numPrezzo||0).toFixed(2)}</strong></span>}
+        </div>
+      )}
     </div>
   )
 }
