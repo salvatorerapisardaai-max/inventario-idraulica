@@ -2,9 +2,9 @@
 import { QRModal } from './QRModal'
 import { BarcodeScanner } from './BarcodeScanner'
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/ssr'
 
-const supabase = createClient(
+const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
@@ -18,6 +18,9 @@ type Cliente = { id: string; nome: string; telefono?: string; email?: string; in
 type Vendita = { id: string; numero: number; data: string; cliente_id: string|null; cliente_nome: string|null; totale: number; metodo_pagamento: string|null; note: string|null; esportata_fic: boolean; created_at: string; vendite_righe?: VenditaRiga[] }
 type VenditaRiga = { id: string; vendita_id: string; articolo_id: string|null; articolo_nome: string; articolo_codice: string|null; quantita: number; prezzo_unitario: number; prezzo_acquisto_snapshot: number|null; totale_riga: number }
 type CarrelloItem = { articolo_id: string; nome: string; codice: string|null; quantita: number; prezzo_unitario: number; prezzo_acquisto: number; quantita_disponibile: number }
+type Spesa = { id: string; data: string; categoria: string; descrizione: string|null; importo: number; ricorrente: boolean; frequenza: string|null; pagato: boolean; note: string|null; created_at: string }
+
+const CATEGORIE_SPESE = ['INPS / Contributi','TARI / Rifiuti','Condominio','IMU / Tasse immobile','Luce / Gas / Acqua','Internet / Telefono','Commercialista','Assicurazioni','Manutenzione immobile','Forniture ufficio','Pubblicità','Altro']
 type ArticoloStats = { id: string; nome: string; categoria: string|null; fornitore_id: string|null; quantita_attuale: number; soglia_riordino: number; venduto_30gg: number; venduto_7gg: number; fatturato_30gg: number; ultima_vendita: string|null; status_vendita: 'attivo'|'lento'|'morto'|'mai_venduto'|'nuovo'; velocita_giornaliera: number; giorni_scorta_stimati: number|null; prezzo_acquisto: number|null; prezzo_vendita: number|null }
 type VenditaGiorno = { giorno: string; numero_vendite: number; fatturato: number; costo_merci: number; margine_lordo: number }
 
@@ -122,12 +125,13 @@ function ZoneSelect({ value, onChange, zone }: { value:string; onChange:(v:strin
 // COMPONENTE PRINCIPALE
 // ═══════════════════════════════════════════════════════════════════
 export default function InventarioApp() {
-  const [tab, setTab] = useState<'dashboard'|'inventario'|'vendita'|'storico'|'aggiungi'|'fornitori'|'clienti'|'alert'>('inventario')
+  const [tab, setTab] = useState<'dashboard'|'inventario'|'vendita'|'storico'|'spese'|'aggiungi'|'fornitori'|'clienti'|'alert'>('inventario')
   const [articoli, setArticoli] = useState<Articolo[]>([])
   const [fornitori, setFornitori] = useState<Fornitore[]>([])
   const [clienti, setClienti] = useState<Cliente[]>([])
   const [zone, setZone] = useState<Zona[]>([])
   const [vendite, setVendite] = useState<Vendita[]>([])
+  const [spese, setSpese] = useState<Spesa[]>([])
   const [stats, setStats] = useState<ArticoloStats[]>([])
   const [trend, setTrend] = useState<VenditaGiorno[]>([])
   const [loading, setLoading] = useState(true)
@@ -139,18 +143,19 @@ export default function InventarioApp() {
     setLoading(true)
     const [
       { data: arts }, { data: forn }, { data: zon }, { data: cli },
-      { data: vend }, { data: st }, { data: tr },
+      { data: vend }, { data: sp }, { data: st }, { data: tr },
     ] = await Promise.all([
       supabase.from('articoli').select('*, fornitori(*)').order('nome'),
       supabase.from('fornitori').select('*').order('nome'),
       supabase.from('zone_albero').select('*').order('sort_key'),
       supabase.from('clienti').select('*').order('nome'),
       supabase.from('vendite').select('*, vendite_righe(*)').order('data', { ascending:false }).limit(500),
+      supabase.from('spese').select('*').order('data', { ascending:false }),
       supabase.from('articoli_stats').select('*'),
       supabase.from('vendite_per_giorno').select('*').limit(60),
     ])
     setArticoli(arts||[]); setFornitori(forn||[]); setZone(zon||[]); setClienti(cli||[])
-    setVendite(vend||[]); setStats(st||[]); setTrend(tr||[])
+    setVendite(vend||[]); setSpese(sp||[]); setStats(st||[]); setTrend(tr||[])
     setLoading(false)
   }
 
@@ -169,6 +174,7 @@ export default function InventarioApp() {
     { id:'inventario', label:`Inventario (${articoli.length})` },
     { id:'vendita', label:'💰 Vendita' },
     { id:'storico', label:`📋 Storico (${vendite.length})` },
+    { id:'spese', label:`💸 Spese` },
     { id:'aggiungi', label:'+ Aggiungi' },
     { id:'fornitori', label:`Fornitori (${fornitori.length})` },
     { id:'clienti', label:`Clienti (${clienti.length})` },
@@ -208,10 +214,11 @@ export default function InventarioApp() {
 
       {/* Content */}
       <div style={{ maxWidth:1100, margin:'0 auto', padding:'20px 16px' }}>
-        {tab==='dashboard' && <TabDashboard articoli={articoli} fornitori={fornitori} stats={stats} trend={trend} vendite={vendite} />}
+        {tab==='dashboard' && <TabDashboard articoli={articoli} fornitori={fornitori} stats={stats} trend={trend} vendite={vendite} spese={spese} />}
         {tab==='inventario' && <TabInventario articoli={articoli} fornitori={fornitori} zone={zone} onReload={carica} />}
         {tab==='vendita' && <TabVendita articoli={articoli} clienti={clienti} onSold={carica} />}
         {tab==='storico' && <TabStorico vendite={vendite} clienti={clienti} onReload={carica} />}
+        {tab==='spese' && <TabSpese spese={spese} onReload={carica} />}
         {tab==='aggiungi' && <TabAggiungi fornitori={fornitori} zone={zone} initialCodice={initialCodice} onSaved={()=>{ setInitialCodice(''); carica(); setTab('inventario') }} />}
         {tab==='fornitori' && <TabFornitori fornitori={fornitori} onReload={carica} />}
         {tab==='clienti' && <TabClienti clienti={clienti} onReload={carica} />}
@@ -259,7 +266,7 @@ export default function InventarioApp() {
 // ═══════════════════════════════════════════════════════════════════
 // TAB DASHBOARD POTENZIATA (con analytics vendite)
 // ═══════════════════════════════════════════════════════════════════
-function TabDashboard({ articoli, fornitori, stats, trend, vendite }: { articoli:Articolo[]; fornitori:Fornitore[]; stats:ArticoloStats[]; trend:VenditaGiorno[]; vendite:Vendita[] }) {
+function TabDashboard({ articoli, fornitori, stats, trend, vendite, spese }: { articoli:Articolo[]; fornitori:Fornitore[]; stats:ArticoloStats[]; trend:VenditaGiorno[]; vendite:Vendita[]; spese:Spesa[] }) {
   // Magazzino
   const va = articoli.reduce((s,a)=>s+a.quantita*(a.prezzo_acquisto||0),0)
   const vv = articoli.reduce((s,a)=>s+a.quantita*(a.prezzo_vendita||0),0)
@@ -372,7 +379,38 @@ function TabDashboard({ articoli, fornitori, stats, trend, vendite }: { articoli
         </div>
       )}
 
-      {/* SEZIONE 3: MAGAZZINO */}
+      {/* SEZIONE 3: P&L - Conto Economico semplificato */}
+      {(haVendite || spese.length>0) && (() => {
+        const speseAnno = spese.filter(s=>new Date(s.data).getFullYear()===new Date().getFullYear() && s.pagato).reduce((sum,s)=>sum+Number(s.importo),0)
+        const fattAnno = vendite.filter(v=>new Date(v.data).getFullYear()===new Date().getFullYear()).reduce((s,v)=>s+Number(v.totale),0)
+        const costoAnno = trend.filter(t=>new Date(t.giorno).getFullYear()===new Date().getFullYear()).reduce((s,t)=>s+Number(t.costo_merci),0)
+        const margineAnno = fattAnno - costoAnno
+        const risultatoAnno = margineAnno - speseAnno
+        return (
+          <div>
+            <h2 style={{ margin:'0 0 12px', fontSize:13, fontWeight:700, color:C.text, textTransform:'uppercase', letterSpacing:'0.1em' }}>📑 P&L {new Date().getFullYear()} (anno corrente)</h2>
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
+              <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+                {[
+                  { label:'Fatturato', value:fattAnno, color:C.green, bold:false, indent:0 },
+                  { label:'− Costo merci vendute', value:-costoAnno, color:C.muted, bold:false, indent:1 },
+                  { label:'= Margine lordo', value:margineAnno, color:margineAnno>=0?C.green:C.red, bold:true, indent:0, border:true },
+                  { label:'− Spese operative', value:-speseAnno, color:C.muted, bold:false, indent:1 },
+                  { label:'= Risultato operativo', value:risultatoAnno, color:risultatoAnno>=0?C.green:C.red, bold:true, indent:0, border:true },
+                ].map(({label,value,color,bold,indent,border},i)=>(
+                  <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 0', borderTop:border||i===0?`1px solid ${C.border}`:'none', paddingLeft:indent?16:0 }}>
+                    <span style={{ fontSize:13, color:bold?C.text:C.muted, fontWeight:bold?700:400 }}>{label}</span>
+                    <span style={{ fontSize:bold?16:13, fontWeight:bold?700:400, color }}>{value>=0?'':'-'}€ {Math.abs(value).toFixed(0)}</span>
+                  </div>
+                ))}
+              </div>
+              {speseAnno===0 && <div style={{ fontSize:11, color:C.muted, marginTop:12, fontStyle:'italic' }}>💡 Aggiungi le spese nella tab "Spese" per completare il P&L</div>}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* SEZIONE 4: MAGAZZINO */}
       <div>
         <h2 style={{ margin:'0 0 12px', fontSize:13, fontWeight:700, color:C.text, textTransform:'uppercase', letterSpacing:'0.1em' }}>📦 Magazzino</h2>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:10 }}>
@@ -844,6 +882,200 @@ function TabStorico({ vendite, clienti, onReload }: { vendite:Vendita[]; clienti
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB SPESE
+// ═══════════════════════════════════════════════════════════════════
+function TabSpese({ spese, onReload }: { spese:Spesa[]; onReload:()=>void }) {
+  const [form, setForm] = useState({ data:new Date().toISOString().split('T')[0], categoria:'', descrizione:'', importo:'', ricorrente:false, frequenza:'mensile', pagato:true, note:'' })
+  const [saving, setSaving] = useState(false)
+  const [periodo, setPeriodo] = useState<'mese'|'anno'|'tutto'>('mese')
+  const [editId, setEditId] = useState<string|null>(null)
+  const set = (k:string, v:any) => setForm(f=>({...f,[k]:v}))
+
+  const ora = new Date()
+  const filtrate = spese.filter(s=>{
+    const d = new Date(s.data)
+    if (periodo==='mese') return d.getFullYear()===ora.getFullYear() && d.getMonth()===ora.getMonth()
+    if (periodo==='anno') return d.getFullYear()===ora.getFullYear()
+    return true
+  })
+
+  const totalePagato = filtrate.filter(s=>s.pagato).reduce((sum,s)=>sum+Number(s.importo),0)
+  const totaleDaPagare = filtrate.filter(s=>!s.pagato).reduce((sum,s)=>sum+Number(s.importo),0)
+
+  const perCategoria = CATEGORIE_SPESE.map(cat=>({
+    cat, totale: filtrate.filter(s=>s.categoria===cat).reduce((sum,s)=>sum+Number(s.importo),0)
+  })).filter(c=>c.totale>0).sort((a,b)=>b.totale-a.totale)
+
+  const salva = async () => {
+    if (!form.categoria || !form.importo || Number(form.importo)<=0) return
+    setSaving(true)
+    const payload = { data:form.data, categoria:form.categoria, descrizione:form.descrizione||null, importo:Number(form.importo), ricorrente:form.ricorrente, frequenza:form.ricorrente?form.frequenza:null, pagato:form.pagato, note:form.note||null }
+    const { error } = await supabase.from('spese').insert(payload)
+    if (error) { alert(error.message); setSaving(false); return }
+    setForm({ data:new Date().toISOString().split('T')[0], categoria:'', descrizione:'', importo:'', ricorrente:false, frequenza:'mensile', pagato:true, note:'' })
+    setSaving(false); onReload()
+  }
+
+  const togglePagato = async (s:Spesa) => {
+    await supabase.from('spese').update({ pagato:!s.pagato }).eq('id',s.id)
+    onReload()
+  }
+
+  const elimina = async (id:string) => {
+    if (!confirm('Eliminare questa spesa?')) return
+    await supabase.from('spese').delete().eq('id',id); onReload()
+  }
+
+  const mesiLabel = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+
+  return (
+    <div style={{ display:'flex', gap:24, flexWrap:'wrap' }}>
+      {/* COLONNA SINISTRA: Lista spese */}
+      <div style={{ flex:1, minWidth:300 }}>
+        {/* Filtri */}
+        <div style={{ display:'flex', gap:6, marginBottom:16, alignItems:'center', flexWrap:'wrap' }}>
+          {[['mese',`${mesiLabel[ora.getMonth()]} ${ora.getFullYear()}`],['anno',String(ora.getFullYear())],['tutto','Tutto']].map(([v,l])=>(
+            <button key={v} onClick={()=>setPeriodo(v as any)} style={{ padding:'5px 12px', background:periodo===v?C.accentSoft:C.surface, border:`1px solid ${periodo===v?C.accent:C.border}`, color:periodo===v?C.accent:C.muted, borderRadius:5, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>{l}</button>
+          ))}
+        </div>
+
+        {/* KPI */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16 }}>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 12px' }}>
+            <div style={labelStyle}>Pagate</div>
+            <div style={{ fontSize:16, fontWeight:700, color:C.red }}>€ {totalePagato.toFixed(0)}</div>
+          </div>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 12px' }}>
+            <div style={labelStyle}>Da pagare</div>
+            <div style={{ fontSize:16, fontWeight:700, color:C.orange }}>€ {totaleDaPagare.toFixed(0)}</div>
+          </div>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 12px' }}>
+            <div style={labelStyle}>Totale</div>
+            <div style={{ fontSize:16, fontWeight:700, color:C.text }}>€ {(totalePagato+totaleDaPagare).toFixed(0)}</div>
+          </div>
+        </div>
+
+        {/* Per categoria mini-chart */}
+        {perCategoria.length>0 && (
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 14px', marginBottom:14 }}>
+            <div style={{ ...labelStyle, marginBottom:10 }}>Per categoria</div>
+            {perCategoria.map(({cat,totale})=>{
+              const max = perCategoria[0].totale
+              return (
+                <div key={cat} style={{ marginBottom:8 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
+                    <span style={{ fontSize:12 }}>{cat}</span>
+                    <span style={{ fontSize:11, color:C.muted }}>€ {totale.toFixed(0)}</span>
+                  </div>
+                  <div style={{ height:4, background:C.border, borderRadius:2, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:`${(totale/max)*100}%`, background:C.red, borderRadius:2 }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Lista */}
+        {filtrate.length===0 ? (
+          <div style={{ textAlign:'center', color:C.muted, padding:40, fontSize:13, background:C.surface, borderRadius:8, border:`1px dashed ${C.border}` }}>
+            Nessuna spesa nel periodo selezionato.
+          </div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+            {filtrate.map(s=>(
+              <div key={s.id} style={{ background:C.surface, border:`1px solid ${s.pagato?C.border:C.orange+'66'}`, borderRadius:6, padding:'10px 12px', display:'flex', alignItems:'center', gap:10 }}>
+                <button onClick={()=>togglePagato(s)} title={s.pagato?'Segna come da pagare':'Segna come pagata'} style={{ width:22, height:22, borderRadius:'50%', border:`2px solid ${s.pagato?C.green:C.orange}`, background:s.pagato?C.green+'33':'transparent', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11 }}>
+                  {s.pagato?'✓':''}
+                </button>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                    <span style={{ fontSize:12, fontWeight:600 }}>{s.categoria}</span>
+                    {s.ricorrente && <span style={{ fontSize:10, padding:'1px 5px', borderRadius:3, background:C.accentSoft, color:C.accent }}>↻ {s.frequenza}</span>}
+                    {!s.pagato && <span style={{ fontSize:10, padding:'1px 5px', borderRadius:3, background:'#3d2a00', color:C.orange }}>da pagare</span>}
+                  </div>
+                  <div style={{ fontSize:11, color:C.muted, marginTop:2, display:'flex', gap:8 }}>
+                    <span>{new Date(s.data).toLocaleDateString('it-IT')}</span>
+                    {s.descrizione && <span>· {s.descrizione}</span>}
+                  </div>
+                </div>
+                <div style={{ textAlign:'right', flexShrink:0 }}>
+                  <div style={{ fontSize:14, fontWeight:700, color:s.pagato?C.red:C.orange }}>€ {Number(s.importo).toFixed(2)}</div>
+                </div>
+                <button onClick={()=>elimina(s.id)} style={{ background:'none', border:'none', color:C.dim, cursor:'pointer', fontSize:14, padding:0 }}>🗑</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* COLONNA DESTRA: Aggiungi spesa */}
+      <div style={{ width:280, flexShrink:0 }}>
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
+          <div style={{ ...labelStyle, marginBottom:14 }}>NUOVA SPESA</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <Field label="Data">
+              <input type="date" value={form.data} onChange={e=>set('data',e.target.value)} style={inp} />
+            </Field>
+            <Field label="Categoria *">
+              <select value={form.categoria} onChange={e=>set('categoria',e.target.value)} style={sel}>
+                <option value="">— Scegli —</option>
+                {CATEGORIE_SPESE.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+            <Field label="Descrizione">
+              <input value={form.descrizione} onChange={e=>set('descrizione',e.target.value)} placeholder="es. Febbraio 2025, quota trimestrale..." style={inp} />
+            </Field>
+            <Field label="Importo € *">
+              <input type="number" inputMode="decimal" step="0.01" min="0" value={form.importo} onChange={e=>set('importo',e.target.value)} placeholder="0.00" style={inp} />
+            </Field>
+
+            {/* Ricorrente */}
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <input type="checkbox" id="ricorrente" checked={form.ricorrente} onChange={e=>set('ricorrente',e.target.checked)} style={{ width:16, height:16, cursor:'pointer' }} />
+              <label htmlFor="ricorrente" style={{ fontSize:12, color:C.text, cursor:'pointer' }}>Spesa ricorrente</label>
+            </div>
+            {form.ricorrente && (
+              <Field label="Frequenza">
+                <select value={form.frequenza} onChange={e=>set('frequenza',e.target.value)} style={sel}>
+                  <option value="mensile">Mensile</option>
+                  <option value="trimestrale">Trimestrale</option>
+                  <option value="semestrale">Semestrale</option>
+                  <option value="annuale">Annuale</option>
+                </select>
+              </Field>
+            )}
+
+            {/* Già pagata */}
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <input type="checkbox" id="pagato" checked={form.pagato} onChange={e=>set('pagato',e.target.checked)} style={{ width:16, height:16, cursor:'pointer' }} />
+              <label htmlFor="pagato" style={{ fontSize:12, color:C.text, cursor:'pointer' }}>Già pagata</label>
+            </div>
+
+            <Field label="Note">
+              <input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="es. fattura n°..." style={inp} />
+            </Field>
+
+            <button onClick={salva} disabled={!form.categoria||!form.importo||Number(form.importo)<=0||saving}
+              style={{ ...btnPrimary, opacity:!form.categoria||!form.importo||saving?0.5:1, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+              {saving?<><Spinner/> Salvo...</>:'+ Registra spesa'}
+            </button>
+          </div>
+        </div>
+
+        {/* Info immobile */}
+        <div style={{ background:'#1a1a0a', border:`1px solid #3d3d00`, borderRadius:8, padding:'12px 14px', marginTop:12 }}>
+          <div style={{ fontSize:11, color:'#a0a000', fontWeight:600, marginBottom:6 }}>🏠 Nota immobile</div>
+          <div style={{ fontSize:11, color:C.muted, lineHeight:1.5 }}>
+            L'immobile è di proprietà. Non registrare affitto. Usa <strong style={{color:C.text}}>IMU / Tasse immobile</strong> per la tassa annuale e <strong style={{color:C.text}}>Condominio</strong> per le spese condominiali se presenti.
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
