@@ -5,9 +5,11 @@ import { createServerClient } from '@supabase/ssr'
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // Rotte pubbliche
   const isPublic =
     pathname.startsWith('/login') ||
     pathname.startsWith('/articolo/') ||
+    pathname.startsWith('/cliente/') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
 
