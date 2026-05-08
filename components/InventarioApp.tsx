@@ -1,7 +1,7 @@
 'use client'
 import { QRModal } from './QRModal'
 import { BarcodeScanner } from './BarcodeScanner'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -14,7 +14,20 @@ type Zona = { id: string; codice: string; nome: string; tipo: string; parent_id:
 type Articolo = { id: string; nome: string; codice?: string; categoria?: string; descrizione?: string; utilizzo?: string; posizione?: string; zona_id?: string; foto_url?: string; prezzo_acquisto?: number; prezzo_vendita?: number; quantita: number; soglia_riordino: number; fornitore_id?: string; note?: string; fornitori?: Fornitore | null; zona_codice?: string; zona_nome?: string; zona_path?: string }
 type Cliente = { id: string; nome: string; telefono?: string; email?: string; indirizzo?: string; note?: string; created_at?: string }
 
+// ─── Nuovi tipi vendite ───
+type Vendita = { id: string; numero: number; data: string; cliente_id: string|null; cliente_nome: string|null; totale: number; metodo_pagamento: string|null; note: string|null; esportata_fic: boolean; created_at: string; vendite_righe?: VenditaRiga[] }
+type VenditaRiga = { id: string; vendita_id: string; articolo_id: string|null; articolo_nome: string; articolo_codice: string|null; quantita: number; prezzo_unitario: number; prezzo_acquisto_snapshot: number|null; totale_riga: number }
+type CarrelloItem = { articolo_id: string; nome: string; codice: string|null; quantita: number; prezzo_unitario: number; prezzo_acquisto: number; quantita_disponibile: number }
+type ArticoloStats = { id: string; nome: string; categoria: string|null; fornitore_id: string|null; quantita_attuale: number; soglia_riordino: number; venduto_30gg: number; venduto_7gg: number; fatturato_30gg: number; ultima_vendita: string|null; status_vendita: 'attivo'|'lento'|'morto'|'mai_venduto'|'nuovo'; velocita_giornaliera: number; giorni_scorta_stimati: number|null; prezzo_acquisto: number|null; prezzo_vendita: number|null }
+type VenditaGiorno = { giorno: string; numero_vendite: number; fatturato: number; costo_merci: number; margine_lordo: number }
+
 const CATEGORIE = ['Raccordi','Valvole','Tubi e Tubazioni','Guarnizioni e O-ring','Pompe','Filtri','Manometri e Strumenti','Rubinetteria','Giunti','Accessori','Altro']
+const METODI_PAGAMENTO: Array<{val:'contanti'|'carta'|'bonifico'|'altro'; label:string; icon:string}> = [
+  { val:'contanti', label:'Contanti', icon:'💶' },
+  { val:'carta', label:'Carta', icon:'💳' },
+  { val:'bonifico', label:'Bonifico', icon:'🏦' },
+  { val:'altro', label:'Altro', icon:'•' },
+]
 
 const C = { bg:'#0f0f0f', surface:'#1a1a1a', surfaceHi:'#222', border:'#2a2a2a', text:'#e8e8e8', muted:'#888', dim:'#444', accent:'#3b82f6', accentSoft:'#1e3a5f', red:'#ef4444', green:'#22c55e', orange:'#f97316', purple:'#a855f7' }
 
@@ -22,6 +35,7 @@ const inp: React.CSSProperties = { width:'100%', padding:'9px 11px', background:
 const sel: React.CSSProperties = { ...inp, cursor:'pointer' }
 const btnPrimary: React.CSSProperties = { padding:'10px 18px', background:C.accent, color:'#fff', border:'none', borderRadius:5, fontSize:12, fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase', cursor:'pointer', fontFamily:'inherit' }
 const btnSecondary: React.CSSProperties = { padding:'10px 16px', background:'none', color:C.muted, border:`1px solid ${C.border}`, borderRadius:5, fontSize:12, cursor:'pointer', fontFamily:'inherit' }
+const btnSuccess: React.CSSProperties = { ...btnPrimary, background:C.green }
 const labelStyle: React.CSSProperties = { fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:4 }
 
 function sanitize(form: Record<string, any>) {
@@ -47,6 +61,29 @@ function exportCSV(articoli: Articolo[], fornitori: Fornitore[]) {
   const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'})
   const url = URL.createObjectURL(blob)
   const el = document.createElement('a'); el.href=url; el.download=`inventario_${new Date().toISOString().split('T')[0]}.csv`; el.click()
+  URL.revokeObjectURL(url)
+}
+
+// Export vendite per Fatture in Cloud
+function exportVenditeCSV(vendite: Vendita[], dal: string, al: string) {
+  const headers = ['Numero','Data','Cliente','Articolo','Codice','Quantità','Prezzo Unit.','Totale Riga','Metodo Pagamento','Totale Vendita','Note']
+  const rows: string[][] = []
+  vendite.forEach(v => {
+    if (!v.vendite_righe || v.vendite_righe.length===0) {
+      rows.push([String(v.numero), new Date(v.data).toLocaleDateString('it-IT'), v.cliente_nome||'', '', '', '', '', '', v.metodo_pagamento||'', v.totale.toFixed(2), v.note||''])
+    } else {
+      v.vendite_righe.forEach((r, i) => rows.push([
+        String(v.numero), new Date(v.data).toLocaleDateString('it-IT'), v.cliente_nome||'',
+        r.articolo_nome, r.articolo_codice||'', String(r.quantita),
+        r.prezzo_unitario.toFixed(2), r.totale_riga.toFixed(2),
+        i===0?(v.metodo_pagamento||''):'', i===0?v.totale.toFixed(2):'', i===0?(v.note||''):'',
+      ]))
+    }
+  })
+  const csv = [headers,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n')
+  const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'})
+  const url = URL.createObjectURL(blob)
+  const el = document.createElement('a'); el.href=url; el.download=`vendite_${dal}_${al}.csv`; el.click()
   URL.revokeObjectURL(url)
 }
 
@@ -85,11 +122,14 @@ function ZoneSelect({ value, onChange, zone }: { value:string; onChange:(v:strin
 // COMPONENTE PRINCIPALE
 // ═══════════════════════════════════════════════════════════════════
 export default function InventarioApp() {
-  const [tab, setTab] = useState<'dashboard'|'inventario'|'aggiungi'|'fornitori'|'clienti'|'alert'>('inventario')
+  const [tab, setTab] = useState<'dashboard'|'inventario'|'vendita'|'storico'|'aggiungi'|'fornitori'|'clienti'|'alert'>('inventario')
   const [articoli, setArticoli] = useState<Articolo[]>([])
   const [fornitori, setFornitori] = useState<Fornitore[]>([])
   const [clienti, setClienti] = useState<Cliente[]>([])
   const [zone, setZone] = useState<Zona[]>([])
+  const [vendite, setVendite] = useState<Vendita[]>([])
+  const [stats, setStats] = useState<ArticoloStats[]>([])
+  const [trend, setTrend] = useState<VenditaGiorno[]>([])
   const [loading, setLoading] = useState(true)
   const [scannerOpen, setScannerOpen] = useState(false)
   const [scanResult, setScanResult] = useState<{found: boolean; articolo?: Articolo; codice?: string} | null>(null)
@@ -97,13 +137,20 @@ export default function InventarioApp() {
 
   const carica = async () => {
     setLoading(true)
-    const [{ data: arts }, { data: forn }, { data: zon }, { data: cli }] = await Promise.all([
+    const [
+      { data: arts }, { data: forn }, { data: zon }, { data: cli },
+      { data: vend }, { data: st }, { data: tr },
+    ] = await Promise.all([
       supabase.from('articoli').select('*, fornitori(*)').order('nome'),
       supabase.from('fornitori').select('*').order('nome'),
       supabase.from('zone_albero').select('*').order('sort_key'),
       supabase.from('clienti').select('*').order('nome'),
+      supabase.from('vendite').select('*, vendite_righe(*)').order('data', { ascending:false }).limit(500),
+      supabase.from('articoli_stats').select('*'),
+      supabase.from('vendite_per_giorno').select('*').limit(60),
     ])
     setArticoli(arts||[]); setFornitori(forn||[]); setZone(zon||[]); setClienti(cli||[])
+    setVendite(vend||[]); setStats(st||[]); setTrend(tr||[])
     setLoading(false)
   }
 
@@ -120,6 +167,8 @@ export default function InventarioApp() {
   const tabs = [
     { id:'dashboard', label:'📊' },
     { id:'inventario', label:`Inventario (${articoli.length})` },
+    { id:'vendita', label:'💰 Vendita' },
+    { id:'storico', label:`📋 Storico (${vendite.length})` },
     { id:'aggiungi', label:'+ Aggiungi' },
     { id:'fornitori', label:`Fornitori (${fornitori.length})` },
     { id:'clienti', label:`Clienti (${clienti.length})` },
@@ -133,6 +182,7 @@ export default function InventarioApp() {
         input:focus,select:focus,textarea:focus{outline:2px solid ${C.accent};outline-offset:-1px}
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes scanline{0%,100%{transform:translateY(-28px);opacity:.4}50%{transform:translateY(28px);opacity:1}}
+        @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
         ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:${C.bg}}::-webkit-scrollbar-thumb{background:${C.dim};border-radius:3px}
       `}</style>
 
@@ -144,7 +194,6 @@ export default function InventarioApp() {
               <h1 style={{ margin:0, fontSize:17, fontWeight:700 }}>🔧 Inventario Idraulica</h1>
               {loading && <Spinner />}
             </div>
-            {/* Scan button sempre visibile */}
             <button onClick={()=>setScannerOpen(true)} style={{ padding:'7px 14px', background:C.accentSoft, color:C.accent, border:`1px solid #2a4a7f`, borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer' }}>
               📷 Scan
             </button>
@@ -159,8 +208,10 @@ export default function InventarioApp() {
 
       {/* Content */}
       <div style={{ maxWidth:1100, margin:'0 auto', padding:'20px 16px' }}>
-        {tab==='dashboard' && <TabDashboard articoli={articoli} fornitori={fornitori} />}
+        {tab==='dashboard' && <TabDashboard articoli={articoli} fornitori={fornitori} stats={stats} trend={trend} vendite={vendite} />}
         {tab==='inventario' && <TabInventario articoli={articoli} fornitori={fornitori} zone={zone} onReload={carica} />}
+        {tab==='vendita' && <TabVendita articoli={articoli} clienti={clienti} onSold={carica} />}
+        {tab==='storico' && <TabStorico vendite={vendite} clienti={clienti} onReload={carica} />}
         {tab==='aggiungi' && <TabAggiungi fornitori={fornitori} zone={zone} initialCodice={initialCodice} onSaved={()=>{ setInitialCodice(''); carica(); setTab('inventario') }} />}
         {tab==='fornitori' && <TabFornitori fornitori={fornitori} onReload={carica} />}
         {tab==='clienti' && <TabClienti clienti={clienti} onReload={carica} />}
@@ -206,51 +257,136 @@ export default function InventarioApp() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// TAB DASHBOARD
+// TAB DASHBOARD POTENZIATA (con analytics vendite)
 // ═══════════════════════════════════════════════════════════════════
-function TabDashboard({ articoli, fornitori }: { articoli:Articolo[]; fornitori:Fornitore[] }) {
+function TabDashboard({ articoli, fornitori, stats, trend, vendite }: { articoli:Articolo[]; fornitori:Fornitore[]; stats:ArticoloStats[]; trend:VenditaGiorno[]; vendite:Vendita[] }) {
+  // Magazzino
   const va = articoli.reduce((s,a)=>s+a.quantita*(a.prezzo_acquisto||0),0)
   const vv = articoli.reduce((s,a)=>s+a.quantita*(a.prezzo_vendita||0),0)
-  const margine = va>0?((vv-va)/va*100):0
+  const margineMagazzino = va>0?((vv-va)/va*100):0
   const sottoSoglia = articoli.filter(a=>a.quantita<=a.soglia_riordino).length
   const esauriti = articoli.filter(a=>a.quantita===0).length
 
-  const perCategoria = CATEGORIE.map(cat=>({
-    cat, count:articoli.filter(a=>a.categoria===cat).length,
-    valore:articoli.filter(a=>a.categoria===cat).reduce((s,a)=>s+a.quantita*(a.prezzo_vendita||0),0),
-  })).filter(c=>c.count>0).sort((a,b)=>b.valore-a.valore)
+  // Vendite (calcolate dai dati delle vendite caricate)
+  const oggi = new Date(); oggi.setHours(0,0,0,0)
+  const settimanaFa = new Date(); settimanaFa.setDate(settimanaFa.getDate()-7); settimanaFa.setHours(0,0,0,0)
+  const meseFa = new Date(); meseFa.setDate(meseFa.getDate()-30); meseFa.setHours(0,0,0,0)
+
+  const venditeOggi = vendite.filter(v=>new Date(v.data)>=oggi)
+  const venditeSettimana = vendite.filter(v=>new Date(v.data)>=settimanaFa)
+  const venditeMese = vendite.filter(v=>new Date(v.data)>=meseFa)
+
+  const fattOggi = venditeOggi.reduce((s,v)=>s+Number(v.totale),0)
+  const fattSett = venditeSettimana.reduce((s,v)=>s+Number(v.totale),0)
+  const fattMese = venditeMese.reduce((s,v)=>s+Number(v.totale),0)
+
+  // Margine reale ultimi 30gg
+  const margineReale = trend.filter(t=>new Date(t.giorno)>=meseFa).reduce((s,t)=>s+Number(t.margine_lordo),0)
+  const costoMese = trend.filter(t=>new Date(t.giorno)>=meseFa).reduce((s,t)=>s+Number(t.costo_merci),0)
+  const margineRealePerc = costoMese>0?(margineReale/costoMese*100):0
+
+  // Top venduti 30gg
+  const topVenduti = [...stats].filter(s=>s.venduto_30gg>0).sort((a,b)=>b.fatturato_30gg-a.fatturato_30gg).slice(0,5)
+
+  // Articoli morti / mai venduti / lenti
+  const morti = stats.filter(s=>s.status_vendita==='morto'||s.status_vendita==='mai_venduto').slice(0,8)
+
+  // Articoli che stanno per finire (basato su velocità vendita)
+  const finiranno = [...stats].filter(s=>s.giorni_scorta_stimati!==null && s.giorni_scorta_stimati<14 && s.quantita_attuale>0).sort((a,b)=>(a.giorni_scorta_stimati||0)-(b.giorni_scorta_stimati||0)).slice(0,5)
+
+  // Per categoria & fornitore (esistente)
+  const perCategoria = CATEGORIE.map(cat=>({ cat, count:articoli.filter(a=>a.categoria===cat).length, valore:articoli.filter(a=>a.categoria===cat).reduce((s,a)=>s+a.quantita*(a.prezzo_vendita||0),0) })).filter(c=>c.count>0).sort((a,b)=>b.valore-a.valore)
   const maxV = Math.max(...perCategoria.map(c=>c.valore),1)
+  const perForn = fornitori.map(f=>({ nome:f.nome, count:articoli.filter(a=>a.fornitore_id===f.id).length, valore:articoli.filter(a=>a.fornitore_id===f.id).reduce((s,a)=>s+a.quantita*(a.prezzo_acquisto||0),0) })).filter(f=>f.count>0).sort((a,b)=>b.valore-a.valore)
 
-  const top5 = [...articoli].filter(a=>a.prezzo_vendita).sort((a,b)=>b.quantita*(b.prezzo_vendita||0)-a.quantita*(a.prezzo_vendita||0)).slice(0,5)
-
-  const perForn = fornitori.map(f=>({
-    nome:f.nome,
-    count:articoli.filter(a=>a.fornitore_id===f.id).length,
-    valore:articoli.filter(a=>a.fornitore_id===f.id).reduce((s,a)=>s+a.quantita*(a.prezzo_acquisto||0),0),
-  })).filter(f=>f.count>0).sort((a,b)=>b.valore-a.valore)
-
-  const kpis = [
-    { label:'Articoli totali', value:articoli.length, icon:'📦', color:C.accent },
-    { label:'Valore magazzino', value:`€ ${va.toFixed(0)}`, icon:'💰', color:C.green },
-    { label:'Valore potenziale', value:`€ ${vv.toFixed(0)}`, icon:'📈', color:C.orange },
-    { label:'Margine medio', value:`${margine.toFixed(1)}%`, icon:'📊', color:C.purple },
-    { label:'Sotto soglia', value:sottoSoglia, icon:'⚠️', color:sottoSoglia>0?C.red:C.green },
-    { label:'Esauriti', value:esauriti, icon:'❌', color:esauriti>0?C.red:C.green },
-  ]
+  const haVendite = vendite.length>0
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:10 }}>
-        {kpis.map(({label,value,icon,color})=>(
-          <div key={label} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:'14px 16px' }}>
-            <div style={{ fontSize:22, marginBottom:8 }}>{icon}</div>
-            <div style={{ fontSize:20, fontWeight:700, color }}>{value}</div>
-            <div style={{ fontSize:10, color:C.muted, marginTop:4, textTransform:'uppercase', letterSpacing:'0.08em' }}>{label}</div>
-          </div>
-        ))}
+    <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+
+      {/* SEZIONE 1: VENDITE */}
+      <div>
+        <div style={{ display:'flex', alignItems:'baseline', gap:10, marginBottom:12 }}>
+          <h2 style={{ margin:0, fontSize:13, fontWeight:700, color:C.text, textTransform:'uppercase', letterSpacing:'0.1em' }}>📈 Vendite</h2>
+          {!haVendite && <span style={{ fontSize:11, color:C.muted }}>— ancora nessuna vendita registrata</span>}
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:10 }}>
+          <KpiCard icon="🌅" label="Oggi" value={`€ ${fattOggi.toFixed(0)}`} sub={`${venditeOggi.length} vendite`} color={C.green} />
+          <KpiCard icon="📅" label="Ultimi 7 giorni" value={`€ ${fattSett.toFixed(0)}`} sub={`${venditeSettimana.length} vendite`} color={C.accent} />
+          <KpiCard icon="🗓️" label="Ultimi 30 giorni" value={`€ ${fattMese.toFixed(0)}`} sub={`${venditeMese.length} vendite`} color={C.purple} />
+          <KpiCard icon="💎" label="Margine reale 30gg" value={`€ ${margineReale.toFixed(0)}`} sub={`${margineRealePerc.toFixed(1)}% sul costo`} color={C.orange} />
+        </div>
+
+        {/* Grafico trend */}
+        {trend.length>0 && <TrendChart trend={trend} giorni={30} />}
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+      {/* SEZIONE 2: TOP VENDITORI / IN ESAURIMENTO / MORTI */}
+      {haVendite && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:14 }}>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
+            <div style={{ ...labelStyle, marginBottom:14 }}>🏆 Top venditori (30gg)</div>
+            {topVenduti.length===0 ? <div style={{ color:C.muted, fontSize:13 }}>Nessun dato disponibile</div>
+            : topVenduti.map((s,i)=>(
+              <div key={s.id} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, paddingBottom:10, borderBottom:i<topVenduti.length-1?`1px solid ${C.border}`:'none' }}>
+                <span style={{ fontSize:11, color:C.muted, width:20 }}>#{i+1}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.nome}</div>
+                  <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>{s.venduto_30gg} pz · {s.velocita_giornaliera}/gg</div>
+                </div>
+                <span style={{ fontSize:13, fontWeight:700, color:C.green }}>€{Number(s.fatturato_30gg).toFixed(0)}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
+            <div style={{ ...labelStyle, marginBottom:14 }}>⏰ Stanno per finire</div>
+            {finiranno.length===0 ? <div style={{ color:C.muted, fontSize:13 }}>Tutto sotto controllo ✓</div>
+            : finiranno.map((s,i)=>(
+              <div key={s.id} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, paddingBottom:10, borderBottom:i<finiranno.length-1?`1px solid ${C.border}`:'none' }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.nome}</div>
+                  <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>{s.quantita_attuale} pz · velocità {s.velocita_giornaliera}/gg</div>
+                </div>
+                <span style={{ fontSize:11, fontWeight:700, color:s.giorni_scorta_stimati!&&s.giorni_scorta_stimati<7?C.red:C.orange, background:s.giorni_scorta_stimati!&&s.giorni_scorta_stimati<7?'#3d1515':'#3d2415', padding:'3px 8px', borderRadius:3 }}>~{s.giorni_scorta_stimati}gg</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
+            <div style={{ ...labelStyle, marginBottom:14 }}>💀 Articoli morti</div>
+            {morti.length===0 ? <div style={{ color:C.muted, fontSize:13 }}>Nessun articolo stagnante</div>
+            : <>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:12, lineHeight:1.5 }}>Mai venduti o fermi da 60+ giorni. Capitale bloccato: <strong style={{color:C.red}}>€{morti.reduce((s,m)=>s+m.quantita_attuale*(m.prezzo_acquisto||0),0).toFixed(0)}</strong></div>
+              {morti.slice(0,5).map((s,i)=>(
+                <div key={s.id} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:C.muted }}>{s.nome}</div>
+                  </div>
+                  <span style={{ fontSize:11, color:C.dim }}>{s.quantita_attuale} pz · €{(s.quantita_attuale*(s.prezzo_acquisto||0)).toFixed(0)}</span>
+                </div>
+              ))}
+              {morti.length>5 && <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>+{morti.length-5} altri</div>}
+            </>}
+          </div>
+        </div>
+      )}
+
+      {/* SEZIONE 3: MAGAZZINO */}
+      <div>
+        <h2 style={{ margin:'0 0 12px', fontSize:13, fontWeight:700, color:C.text, textTransform:'uppercase', letterSpacing:'0.1em' }}>📦 Magazzino</h2>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:10 }}>
+          <KpiCard icon="📦" label="Articoli totali" value={String(articoli.length)} color={C.accent} />
+          <KpiCard icon="💰" label="Valore acquisto" value={`€ ${va.toFixed(0)}`} color={C.green} />
+          <KpiCard icon="📈" label="Valore potenziale" value={`€ ${vv.toFixed(0)}`} color={C.orange} />
+          <KpiCard icon="📊" label="Margine teorico" value={`${margineMagazzino.toFixed(1)}%`} color={C.purple} />
+          <KpiCard icon="⚠️" label="Sotto soglia" value={String(sottoSoglia)} color={sottoSoglia>0?C.red:C.green} />
+          <KpiCard icon="❌" label="Esauriti" value={String(esauriti)} color={esauriti>0?C.red:C.green} />
+        </div>
+      </div>
+
+      {/* Grafici esistenti */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:14 }}>
         <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
           <div style={{ ...labelStyle, marginBottom:14 }}>Valore per categoria</div>
           {perCategoria.length===0 ? <div style={{ color:C.muted, fontSize:13 }}>Aggiungi categorie agli articoli</div>
@@ -267,41 +403,447 @@ function TabDashboard({ articoli, fornitori }: { articoli:Articolo[]; fornitori:
           ))}
         </div>
 
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
-          <div style={{ ...labelStyle, marginBottom:14 }}>Top 5 per valore</div>
-          {top5.length===0 ? <div style={{ color:C.muted, fontSize:13 }}>Aggiungi prezzi agli articoli</div>
-          : top5.map((a,i)=>(
-            <div key={a.id} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
-              <span style={{ fontSize:12, color:C.muted, width:18, flexShrink:0 }}>#{i+1}</span>
-              {a.foto_url && <img src={a.foto_url} alt="" style={{ width:30, height:30, borderRadius:4, objectFit:'cover', flexShrink:0 }} />}
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{a.nome}</div>
-                <div style={{ fontSize:11, color:C.muted }}>{a.quantita} pz</div>
-              </div>
-              <span style={{ fontSize:13, fontWeight:700, color:C.green, flexShrink:0 }}>€{(a.quantita*(a.prezzo_vendita||0)).toFixed(0)}</span>
+        {perForn.length>0 && (
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
+            <div style={{ ...labelStyle, marginBottom:12 }}>Per fornitore (€ acquisto in stock)</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              {perForn.map(({nome,count,valore})=>(
+                <div key={nome} style={{ background:C.surfaceHi, borderRadius:8, padding:'10px 12px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:600 }}>{nome}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>{count} articoli</div>
+                  </div>
+                  <span style={{ fontSize:15, fontWeight:700, color:C.orange }}>€{valore.toFixed(0)}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
 
-      {perForn.length>0 && (
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18 }}>
-          <div style={{ ...labelStyle, marginBottom:12 }}>Per fornitore (valore acquisto)</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:8 }}>
-            {perForn.map(({nome,count,valore})=>(
-              <div key={nome} style={{ background:C.surfaceHi, borderRadius:8, padding:'10px 12px' }}>
-                <div style={{ fontSize:13, fontWeight:600, marginBottom:2 }}>{nome}</div>
-                <div style={{ fontSize:11, color:C.muted }}>{count} articoli</div>
-                <div style={{ fontSize:16, fontWeight:700, color:C.orange, marginTop:4 }}>€{valore.toFixed(0)}</div>
+      <div style={{ display:'flex', justifyContent:'flex-end' }}>
+        <button onClick={()=>exportCSV(articoli,fornitori)} style={btnSecondary}>📥 Esporta inventario CSV</button>
+      </div>
+    </div>
+  )
+}
+
+function KpiCard({ icon, label, value, sub, color }: { icon:string; label:string; value:string; sub?:string; color:string }) {
+  return (
+    <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:'14px 16px' }}>
+      <div style={{ fontSize:22, marginBottom:8 }}>{icon}</div>
+      <div style={{ fontSize:20, fontWeight:700, color }}>{value}</div>
+      <div style={{ fontSize:10, color:C.muted, marginTop:4, textTransform:'uppercase', letterSpacing:'0.08em' }}>{label}</div>
+      {sub && <div style={{ fontSize:11, color:C.muted, marginTop:3 }}>{sub}</div>}
+    </div>
+  )
+}
+
+function TrendChart({ trend, giorni }: { trend:VenditaGiorno[]; giorni:number }) {
+  // Riempi i giorni mancanti con 0
+  const days: { giorno:string; fatturato:number }[] = []
+  for (let i=giorni-1; i>=0; i--) {
+    const d = new Date(); d.setDate(d.getDate()-i); d.setHours(0,0,0,0)
+    const key = d.toISOString().split('T')[0]
+    const found = trend.find(t=>t.giorno===key)
+    days.push({ giorno:key, fatturato: found?Number(found.fatturato):0 })
+  }
+  const max = Math.max(...days.map(d=>d.fatturato), 1)
+  return (
+    <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:18, marginTop:14 }}>
+      <div style={{ ...labelStyle, marginBottom:14 }}>Trend ultimi {giorni} giorni</div>
+      <div style={{ display:'flex', alignItems:'flex-end', gap:2, height:80 }}>
+        {days.map((d,i)=>(
+          <div key={i} title={`${new Date(d.giorno).toLocaleDateString('it-IT')}: €${d.fatturato.toFixed(0)}`}
+            style={{ flex:1, height:`${(d.fatturato/max)*100}%`, minHeight:d.fatturato>0?2:1, background:d.fatturato>0?C.accent:C.border, borderRadius:'2px 2px 0 0' }} />
+        ))}
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between', marginTop:6, fontSize:10, color:C.muted }}>
+        <span>{new Date(days[0].giorno).toLocaleDateString('it-IT',{day:'numeric',month:'short'})}</span>
+        <span>oggi</span>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB VENDITA (POS)
+// ═══════════════════════════════════════════════════════════════════
+function TabVendita({ articoli, clienti, onSold }: { articoli:Articolo[]; clienti:Cliente[]; onSold:()=>void }) {
+  const [carrello, setCarrello] = useState<CarrelloItem[]>([])
+  const [cerca, setCerca] = useState('')
+  const [clienteId, setClienteId] = useState('')
+  const [clienteNomeManuale, setClienteNomeManuale] = useState('')
+  const [metodoPagamento, setMetodoPagamento] = useState<'contanti'|'carta'|'bonifico'|'altro'>('contanti')
+  const [note, setNote] = useState('')
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [confermando, setConfermando] = useState(false)
+  const [ricevuta, setRicevuta] = useState<{numero:number; totale:number; data:Date; righe:CarrelloItem[]; cliente:string|null; metodo:string} | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const filtrati = useMemo(()=>cerca.length<2?[]:articoli.filter(a=>
+    a.nome.toLowerCase().includes(cerca.toLowerCase()) || a.codice?.toLowerCase().includes(cerca.toLowerCase())
+  ).slice(0,8),[cerca,articoli])
+
+  const aggiungi = (a: Articolo) => {
+    if (a.quantita<=0) { alert(`"${a.nome}" è esaurito.`); return }
+    setCarrello(c => {
+      const exists = c.find(x=>x.articolo_id===a.id)
+      if (exists) {
+        if (exists.quantita>=a.quantita) { alert(`Disponibili solo ${a.quantita} pz di "${a.nome}".`); return c }
+        return c.map(x=>x.articolo_id===a.id?{...x, quantita:x.quantita+1}:x)
+      }
+      return [...c, { articolo_id:a.id, nome:a.nome, codice:a.codice||null, quantita:1, prezzo_unitario:a.prezzo_vendita||0, prezzo_acquisto:a.prezzo_acquisto||0, quantita_disponibile:a.quantita }]
+    })
+    setCerca(''); inputRef.current?.focus()
+  }
+
+  const aggiornaQta = (id:string, delta:number) => {
+    setCarrello(c=>c.map(x=>{
+      if (x.articolo_id!==id) return x
+      const nuova = x.quantita+delta
+      if (nuova<1) return x
+      if (nuova>x.quantita_disponibile) { alert(`Disponibili solo ${x.quantita_disponibile} pz.`); return x }
+      return {...x, quantita:nuova}
+    }))
+  }
+
+  const setPrezzo = (id:string, p:string) => {
+    const num = Number(p); if (isNaN(num)||num<0) return
+    setCarrello(c=>c.map(x=>x.articolo_id===id?{...x, prezzo_unitario:num}:x))
+  }
+
+  const setQta = (id:string, q:string) => {
+    const num = Number(q); if (isNaN(num)||num<1) return
+    setCarrello(c=>c.map(x=>{
+      if (x.articolo_id!==id) return x
+      if (num>x.quantita_disponibile) { alert(`Disponibili solo ${x.quantita_disponibile} pz.`); return x }
+      return {...x, quantita:num}
+    }))
+  }
+
+  const rimuovi = (id:string) => setCarrello(c=>c.filter(x=>x.articolo_id!==id))
+
+  const totale = carrello.reduce((s,x)=>s+x.quantita*x.prezzo_unitario,0)
+
+  const conferma = async () => {
+    if (carrello.length===0) return
+    if (!confirm(`Confermi vendita di ${carrello.length} articoli per € ${totale.toFixed(2)}?`)) return
+    setConfermando(true)
+    const cliente = clienti.find(c=>c.id===clienteId)
+    const nomeCliente = cliente?.nome || clienteNomeManuale || null
+    const { data, error } = await supabase.rpc('registra_vendita', {
+      p_cliente_id: clienteId||null,
+      p_cliente_nome: nomeCliente,
+      p_metodo_pagamento: metodoPagamento,
+      p_note: note||null,
+      p_righe: carrello.map(x=>({ articolo_id:x.articolo_id, quantita:x.quantita, prezzo_unitario:x.prezzo_unitario })),
+    })
+    if (error) { alert(`Errore: ${error.message}`); setConfermando(false); return }
+    setRicevuta({ numero:(data as any).numero, totale:Number((data as any).totale), data:new Date(), righe:carrello, cliente:nomeCliente, metodo:metodoPagamento })
+    setCarrello([]); setClienteId(''); setClienteNomeManuale(''); setNote(''); setMetodoPagamento('contanti')
+    setConfermando(false); onSold()
+  }
+
+  const handleBarcode = (code:string) => {
+    setScannerOpen(false)
+    const a = articoli.find(x=>x.codice===code)
+    if (a) aggiungi(a)
+    else alert(`Codice ${code} non trovato in inventario.`)
+  }
+
+  if (ricevuta) return <Ricevuta ricevuta={ricevuta} onClose={()=>setRicevuta(null)} />
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:16, '@media (min-width:768px)':{ gridTemplateColumns:'1fr 380px' } } as any}>
+      {/* COLONNA SINISTRA: Ricerca articoli */}
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        <div style={{ display:'flex', gap:8 }}>
+          <input ref={inputRef} autoFocus placeholder="Cerca articolo per nome o codice..." value={cerca} onChange={e=>setCerca(e.target.value)} style={{ ...inp, flex:1 }} />
+          <button onClick={()=>setScannerOpen(true)} style={{ padding:'9px 14px', background:C.accentSoft, color:C.accent, border:`1px solid #2a4a7f`, borderRadius:5, fontSize:13, cursor:'pointer', flexShrink:0 }}>📷</button>
+        </div>
+
+        {filtrati.length>0 && (
+          <div style={{ display:'flex', flexDirection:'column', gap:1, maxHeight:400, overflowY:'auto' }}>
+            {filtrati.map(a=>(
+              <button key={a.id} onClick={()=>aggiungi(a)} disabled={a.quantita<=0}
+                style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, padding:'10px 12px', display:'flex', alignItems:'center', gap:10, cursor:a.quantita<=0?'not-allowed':'pointer', textAlign:'left', fontFamily:'inherit', opacity:a.quantita<=0?0.4:1 }}
+                onMouseEnter={e=>{ if(a.quantita>0) e.currentTarget.style.borderColor=C.accent }}
+                onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}
+              >
+                {a.foto_url && <img src={a.foto_url} alt="" style={{ width:36, height:36, borderRadius:4, objectFit:'cover', flexShrink:0 }} />}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:C.text }}>{a.nome}</div>
+                  <div style={{ fontSize:11, color:C.muted, marginTop:2, display:'flex', gap:8 }}>
+                    {a.codice && <span>#{a.codice}</span>}
+                    {a.categoria && <span>{a.categoria}</span>}
+                  </div>
+                </div>
+                <div style={{ textAlign:'right', flexShrink:0 }}>
+                  <div style={{ fontSize:14, fontWeight:700, color:C.green }}>€ {Number(a.prezzo_vendita||0).toFixed(2)}</div>
+                  <div style={{ fontSize:11, color:a.quantita<=a.soglia_riordino?C.red:C.muted, marginTop:2 }}>{a.quantita} pz</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {cerca.length<2 && carrello.length===0 && (
+          <div style={{ textAlign:'center', color:C.muted, padding:40, fontSize:13, background:C.surface, borderRadius:8, border:`1px dashed ${C.border}` }}>
+            <div style={{ fontSize:32, marginBottom:12 }}>🛒</div>
+            Cerca un articolo o scansiona un codice per iniziare
+          </div>
+        )}
+      </div>
+
+      {/* COLONNA DESTRA: Carrello */}
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:16, position:'sticky', top:16, alignSelf:'flex-start', maxHeight:'calc(100vh - 100px)', overflowY:'auto' }}>
+        <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:14 }}>
+          <h3 style={{ margin:0, fontSize:13, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em' }}>🛒 Carrello</h3>
+          {carrello.length>0 && <span style={{ fontSize:11, color:C.muted }}>{carrello.reduce((s,x)=>s+x.quantita,0)} pz</span>}
+        </div>
+
+        {carrello.length===0 ? (
+          <div style={{ textAlign:'center', color:C.muted, padding:'40px 20px', fontSize:12 }}>Carrello vuoto</div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:14 }}>
+            {carrello.map(x=>(
+              <div key={x.articolo_id} style={{ background:C.surfaceHi, borderRadius:6, padding:10 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6, gap:6 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis' }}>{x.nome}</div>
+                    {x.codice && <div style={{ fontSize:10, color:C.muted }}>#{x.codice}</div>}
+                  </div>
+                  <button onClick={()=>rimuovi(x.articolo_id)} style={{ background:'none', border:'none', color:C.dim, cursor:'pointer', fontSize:14, padding:0, lineHeight:1 }}>✕</button>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <button onClick={()=>aggiornaQta(x.articolo_id,-1)} style={{ width:26, height:26, background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.text, cursor:'pointer', fontSize:14 }}>−</button>
+                  <input type="number" min={1} max={x.quantita_disponibile} value={x.quantita} onChange={e=>setQta(x.articolo_id, e.target.value)}
+                    style={{ width:42, padding:'4px 6px', background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.text, textAlign:'center', fontSize:12 }} />
+                  <button onClick={()=>aggiornaQta(x.articolo_id,+1)} style={{ width:26, height:26, background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.text, cursor:'pointer', fontSize:14 }}>+</button>
+                  <span style={{ color:C.muted, fontSize:11, margin:'0 4px' }}>×</span>
+                  <input type="number" step="0.01" min={0} value={x.prezzo_unitario} onChange={e=>setPrezzo(x.articolo_id, e.target.value)}
+                    style={{ width:64, padding:'4px 6px', background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.text, fontSize:12 }} />
+                  <span style={{ flex:1, textAlign:'right', fontSize:13, fontWeight:700, color:C.green }}>€{(x.quantita*x.prezzo_unitario).toFixed(2)}</span>
+                </div>
               </div>
             ))}
           </div>
+        )}
+
+        {carrello.length>0 && (
+          <>
+            {/* Totale */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', padding:'12px 0', borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}`, marginBottom:14 }}>
+              <span style={{ fontSize:13, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em' }}>Totale</span>
+              <span style={{ fontSize:24, fontWeight:700, color:C.green }}>€ {totale.toFixed(2)}</span>
+            </div>
+
+            {/* Cliente */}
+            <div style={{ marginBottom:10 }}>
+              <label style={labelStyle}>Cliente (opzionale)</label>
+              <select value={clienteId} onChange={e=>{setClienteId(e.target.value); setClienteNomeManuale('')}} style={sel}>
+                <option value="">— Cliente generico —</option>
+                {clienti.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+              {!clienteId && (
+                <input placeholder="o digita un nome..." value={clienteNomeManuale} onChange={e=>setClienteNomeManuale(e.target.value)} style={{ ...inp, marginTop:6 }} />
+              )}
+            </div>
+
+            {/* Metodo pagamento */}
+            <div style={{ marginBottom:10 }}>
+              <label style={labelStyle}>Pagamento</label>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:4, marginTop:4 }}>
+                {METODI_PAGAMENTO.map(m=>(
+                  <button key={m.val} onClick={()=>setMetodoPagamento(m.val)}
+                    style={{ padding:'8px 4px', background:metodoPagamento===m.val?C.accentSoft:C.surfaceHi, border:`1px solid ${metodoPagamento===m.val?C.accent:C.border}`, borderRadius:5, color:metodoPagamento===m.val?C.accent:C.text, cursor:'pointer', fontSize:11, fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
+                    <span style={{ fontSize:14 }}>{m.icon}</span>
+                    <span>{m.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Note */}
+            <Field label="Note (opzionale)">
+              <input value={note} onChange={e=>setNote(e.target.value)} placeholder="es. cantiere via Roma..." style={inp} />
+            </Field>
+
+            <button onClick={conferma} disabled={confermando} style={{ ...btnSuccess, width:'100%', marginTop:14, padding:'14px', fontSize:13, opacity:confermando?0.6:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+              {confermando ? <><Spinner /> Registrazione...</> : `✓ Conferma vendita € ${totale.toFixed(2)}`}
+            </button>
+          </>
+        )}
+      </div>
+
+      {scannerOpen && <BarcodeScanner onDetected={handleBarcode} onClose={()=>setScannerOpen(false)} />}
+    </div>
+  )
+}
+
+function Ricevuta({ ricevuta, onClose }: { ricevuta:{numero:number; totale:number; data:Date; righe:CarrelloItem[]; cliente:string|null; metodo:string}; onClose:()=>void }) {
+  const stampa = () => window.print()
+  return (
+    <div style={{ maxWidth:500, margin:'40px auto', animation:'slideUp 0.3s ease' }}>
+      <style>{`@media print{body{background:white!important}.no-print{display:none!important}.ricevuta{color:black!important;background:white!important;border:none!important}.ricevuta *{color:black!important}}`}</style>
+      <div className="ricevuta" style={{ background:C.surface, border:`2px solid ${C.green}`, borderRadius:12, padding:30 }}>
+        <div style={{ textAlign:'center', marginBottom:20 }}>
+          <div style={{ fontSize:48, marginBottom:8 }}>✅</div>
+          <h2 style={{ margin:0, fontSize:18, fontWeight:700, color:C.green }}>Vendita registrata</h2>
+          <div style={{ fontSize:11, color:C.muted, marginTop:6 }}>Documento N° {ricevuta.numero}</div>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:C.muted, marginBottom:16, paddingBottom:12, borderBottom:`1px solid ${C.border}` }}>
+          <span>{ricevuta.data.toLocaleString('it-IT')}</span>
+          <span>{ricevuta.metodo}</span>
+        </div>
+        {ricevuta.cliente && <div style={{ fontSize:12, marginBottom:12 }}><span style={{color:C.muted}}>Cliente:</span> <strong>{ricevuta.cliente}</strong></div>}
+        <div style={{ marginBottom:16 }}>
+          {ricevuta.righe.map((r,i)=>(
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:`1px dashed ${C.border}`, fontSize:12 }}>
+              <div style={{ flex:1 }}>
+                <div>{r.nome}</div>
+                <div style={{ color:C.muted, fontSize:11 }}>{r.quantita} × € {r.prezzo_unitario.toFixed(2)}</div>
+              </div>
+              <div style={{ fontWeight:700 }}>€ {(r.quantita*r.prezzo_unitario).toFixed(2)}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', fontSize:18, fontWeight:700, padding:'12px 0', borderTop:`2px solid ${C.green}` }}>
+          <span>TOTALE</span>
+          <span style={{ color:C.green }}>€ {ricevuta.totale.toFixed(2)}</span>
+        </div>
+        <div className="no-print" style={{ display:'flex', gap:8, marginTop:20 }}>
+          <button onClick={stampa} style={{ ...btnSecondary, flex:1 }}>🖨 Stampa</button>
+          <button onClick={onClose} style={{ ...btnPrimary, flex:1 }}>Nuova vendita</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB STORICO VENDITE
+// ═══════════════════════════════════════════════════════════════════
+function TabStorico({ vendite, clienti, onReload }: { vendite:Vendita[]; clienti:Cliente[]; onReload:()=>void }) {
+  const [periodo, setPeriodo] = useState<'oggi'|'7gg'|'30gg'|'tutto'|'custom'>('30gg')
+  const [dal, setDal] = useState(() => { const d=new Date(); d.setDate(d.getDate()-30); return d.toISOString().split('T')[0] })
+  const [al, setAl] = useState(() => new Date().toISOString().split('T')[0])
+  const [expanded, setExpanded] = useState<string|null>(null)
+  const [eliminando, setEliminando] = useState<string|null>(null)
+
+  const filtrate = useMemo(()=>{
+    const ora = new Date()
+    let inizio = new Date(0)
+    if (periodo==='oggi') { inizio=new Date(); inizio.setHours(0,0,0,0) }
+    else if (periodo==='7gg') { inizio=new Date(); inizio.setDate(inizio.getDate()-7); inizio.setHours(0,0,0,0) }
+    else if (periodo==='30gg') { inizio=new Date(); inizio.setDate(inizio.getDate()-30); inizio.setHours(0,0,0,0) }
+    else if (periodo==='custom') { inizio=new Date(dal); inizio.setHours(0,0,0,0) }
+    let fine = ora
+    if (periodo==='custom') { fine=new Date(al); fine.setHours(23,59,59,999) }
+    return vendite.filter(v=>{ const d=new Date(v.data); return d>=inizio && d<=fine })
+  },[vendite, periodo, dal, al])
+
+  const totale = filtrate.reduce((s,v)=>s+Number(v.totale),0)
+  const numero = filtrate.length
+
+  const elimina = async (id:string, num:number) => {
+    if (!confirm(`Eliminare vendita #${num}?\n\nATTENZIONE: il magazzino NON verrà ripristinato automaticamente. Dovrai correggere manualmente le quantità degli articoli se necessario.`)) return
+    setEliminando(id)
+    const { error } = await supabase.from('vendite').delete().eq('id',id)
+    if (error) alert(`Errore: ${error.message}`)
+    else onReload()
+    setEliminando(null)
+  }
+
+  const dalLabel = periodo==='custom'?dal:filtrate.length>0?new Date(filtrate[filtrate.length-1].data).toISOString().split('T')[0]:dal
+  const alLabel = periodo==='custom'?al:new Date().toISOString().split('T')[0]
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      {/* Filtri periodo */}
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+        {[
+          { v:'oggi', l:'Oggi' }, { v:'7gg', l:'7 giorni' }, { v:'30gg', l:'30 giorni' },
+          { v:'tutto', l:'Tutto' }, { v:'custom', l:'Personalizza' },
+        ].map(({v,l})=>(
+          <button key={v} onClick={()=>setPeriodo(v as any)} style={{ padding:'6px 12px', background:periodo===v?C.accentSoft:C.surface, border:`1px solid ${periodo===v?C.accent:C.border}`, color:periodo===v?C.accent:C.muted, borderRadius:5, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>{l}</button>
+        ))}
+        {periodo==='custom' && (
+          <>
+            <input type="date" value={dal} onChange={e=>setDal(e.target.value)} style={{ ...inp, width:'auto' }} />
+            <input type="date" value={al} onChange={e=>setAl(e.target.value)} style={{ ...inp, width:'auto' }} />
+          </>
+        )}
+      </div>
+
+      {/* Riepilogo periodo */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:8 }}>
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 14px' }}>
+          <div style={labelStyle}>Vendite</div>
+          <div style={{ fontSize:18, fontWeight:700, color:C.accent }}>{numero}</div>
+        </div>
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 14px' }}>
+          <div style={labelStyle}>Fatturato</div>
+          <div style={{ fontSize:18, fontWeight:700, color:C.green }}>€ {totale.toFixed(2)}</div>
+        </div>
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 14px' }}>
+          <div style={labelStyle}>Scontrino medio</div>
+          <div style={{ fontSize:18, fontWeight:700, color:C.purple }}>€ {numero>0?(totale/numero).toFixed(2):'0.00'}</div>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end' }}>
+          <button onClick={()=>exportVenditeCSV(filtrate, dalLabel, alLabel)} disabled={filtrate.length===0} style={{ ...btnPrimary, opacity:filtrate.length===0?0.4:1 }}>📥 Esporta CSV</button>
+        </div>
+      </div>
+
+      {/* Lista vendite */}
+      {filtrate.length===0 ? (
+        <div style={{ textAlign:'center', color:C.muted, padding:60, fontSize:13 }}>
+          Nessuna vendita nel periodo selezionato.
+        </div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
+          {filtrate.map(v=>(
+            <div key={v.id} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:6 }}>
+              <div onClick={()=>setExpanded(expanded===v.id?null:v.id)} style={{ padding:'10px 12px', display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+                <div style={{ background:C.accentSoft, color:C.accent, padding:'4px 8px', borderRadius:4, fontSize:11, fontWeight:700, fontFamily:'monospace', flexShrink:0 }}>#{v.numero}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:600 }}>{v.cliente_nome||'Cliente generico'}</div>
+                  <div style={{ fontSize:11, color:C.muted, marginTop:2, display:'flex', gap:8, flexWrap:'wrap' }}>
+                    <span>{new Date(v.data).toLocaleString('it-IT',{ day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</span>
+                    <span>· {v.vendite_righe?.length||0} articoli</span>
+                    {v.metodo_pagamento && <span>· {v.metodo_pagamento}</span>}
+                  </div>
+                </div>
+                <div style={{ textAlign:'right', flexShrink:0 }}>
+                  <div style={{ fontSize:14, fontWeight:700, color:C.green }}>€ {Number(v.totale).toFixed(2)}</div>
+                </div>
+                <span style={{ color:C.dim, fontSize:14 }}>{expanded===v.id?'⌃':'⌄'}</span>
+              </div>
+
+              {expanded===v.id && (
+                <div style={{ padding:'0 12px 12px', borderTop:`1px solid ${C.border}` }}>
+                  <div style={{ marginTop:10 }}>
+                    {v.vendite_righe?.map(r=>(
+                      <div key={r.id} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:`1px dashed ${C.border}`, fontSize:12 }}>
+                        <div style={{ flex:1 }}>
+                          <div>{r.articolo_nome}</div>
+                          <div style={{ color:C.muted, fontSize:10 }}>{r.articolo_codice && `#${r.articolo_codice} · `}{r.quantita} × € {Number(r.prezzo_unitario).toFixed(2)}</div>
+                        </div>
+                        <div style={{ fontWeight:700 }}>€ {Number(r.totale_riga).toFixed(2)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {v.note && <div style={{ marginTop:8, fontSize:11, color:C.muted, fontStyle:'italic' }}>📝 {v.note}</div>}
+                  <div style={{ marginTop:10, display:'flex', justifyContent:'flex-end' }}>
+                    <button onClick={()=>elimina(v.id, v.numero)} disabled={eliminando===v.id} style={{ ...btnSecondary, color:C.red, borderColor:C.red+'44', fontSize:11, padding:'6px 12px' }}>{eliminando===v.id?'...':'🗑 Elimina'}</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
-
-      <div style={{ display:'flex', justifyContent:'flex-end' }}>
-        <button onClick={()=>exportCSV(articoli,fornitori)} style={btnSecondary}>📥 Esporta CSV per commercialista</button>
-      </div>
     </div>
   )
 }
