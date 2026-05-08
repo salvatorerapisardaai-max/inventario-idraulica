@@ -12,7 +12,11 @@ const supabase = createBrowserClient(
 type Fornitore = { id: string; nome: string; telefono?: string; email?: string; indirizzo?: string; note?: string }
 type Zona = { id: string; codice: string; nome: string; tipo: string; parent_id: string | null; ordine: number; livello: number; path_codice: string; path_nome: string; sort_key: string }
 type Articolo = { id: string; nome: string; codice?: string; categoria?: string; descrizione?: string; utilizzo?: string; posizione?: string; zona_id?: string; foto_url?: string; prezzo_acquisto?: number; prezzo_vendita?: number; quantita: number; soglia_riordino: number; fornitore_id?: string; note?: string; fornitori?: Fornitore | null; zona_codice?: string; zona_nome?: string; zona_path?: string }
-type Cliente = { id: string; nome: string; telefono?: string; email?: string; indirizzo?: string; note?: string; created_at?: string }
+type Cliente = { id: string; nome: string; telefono?: string; email?: string; indirizzo?: string; note?: string; access_token?: string; created_at?: string }
+
+// ─── Tipi prenotazioni ───
+type PrenotazioneRiga = { articolo_nome: string; quantita: number; prezzo_stimato: number|null }
+type Prenotazione = { id: string; numero: number; cliente_id: string; data_prenotazione: string; data_scadenza: string; stato: 'attiva'|'completata'|'scaduta'|'annullata'; totale_stimato: number; note: string|null; vendita_id: string|null; created_at: string; clienti?: { nome: string; telefono?: string }; prenotazioni_righe?: { id:string; articolo_id:string; articolo_nome:string; quantita:number; prezzo_stimato:number|null }[] }
 
 // ─── Nuovi tipi vendite ───
 type Vendita = { id: string; numero: number; data: string; cliente_id: string|null; cliente_nome: string|null; totale: number; metodo_pagamento: string|null; note: string|null; esportata_fic: boolean; created_at: string; vendite_righe?: VenditaRiga[] }
@@ -126,12 +130,13 @@ function ZoneSelect({ value, onChange, zone }: { value:string; onChange:(v:strin
 // COMPONENTE PRINCIPALE
 // ═══════════════════════════════════════════════════════════════════
 export default function InventarioApp() {
-  const [tab, setTab] = useState<'dashboard'|'inventario'|'vendita'|'storico'|'spese'|'aggiungi'|'fornitori'|'clienti'|'alert'>('inventario')
+  const [tab, setTab] = useState<'dashboard'|'inventario'|'vendita'|'storico'|'spese'|'prenotazioni'|'aggiungi'|'fornitori'|'clienti'|'alert'>('inventario')
   const [articoli, setArticoli] = useState<Articolo[]>([])
   const [fornitori, setFornitori] = useState<Fornitore[]>([])
   const [clienti, setClienti] = useState<Cliente[]>([])
   const [zone, setZone] = useState<Zona[]>([])
   const [vendite, setVendite] = useState<Vendita[]>([])
+  const [prenotazioni, setPrenotazioni] = useState<Prenotazione[]>([])
   const [spese, setSpese] = useState<Spesa[]>([])
   const [stats, setStats] = useState<ArticoloStats[]>([])
   const [trend, setTrend] = useState<VenditaGiorno[]>([])
@@ -142,9 +147,12 @@ export default function InventarioApp() {
 
   const carica = async () => {
     setLoading(true)
+    // Auto-scadi prenotazioni scadute prima di caricare
+    await supabase.rpc('scadi_prenotazioni')
     const [
       { data: arts }, { data: forn }, { data: zon }, { data: cli },
       { data: vend }, { data: sp }, { data: st }, { data: tr },
+      { data: pren },
     ] = await Promise.all([
       supabase.from('articoli').select('*, fornitori(*)').order('nome'),
       supabase.from('fornitori').select('*').order('nome'),
@@ -154,9 +162,11 @@ export default function InventarioApp() {
       supabase.from('spese').select('*').order('data', { ascending:false }),
       supabase.from('articoli_stats').select('*'),
       supabase.from('vendite_per_giorno').select('*').limit(60),
+      supabase.from('prenotazioni').select('*, clienti(nome,telefono), prenotazioni_righe(*)').order('created_at', { ascending:false }).limit(200),
     ])
     setArticoli(arts||[]); setFornitori(forn||[]); setZone(zon||[]); setClienti(cli||[])
     setVendite(vend||[]); setSpese(sp||[]); setStats(st||[]); setTrend(tr||[])
+    setPrenotazioni(pren||[])
     setLoading(false)
   }
 
@@ -179,10 +189,13 @@ export default function InventarioApp() {
     setScanResult({ found: !!found, articolo: found, codice: code })
   }
 
+  const prenotazioniAttive = prenotazioni.filter(p=>p.stato==='attiva' && new Date(p.data_scadenza)>new Date()).length
+
   const tabs = [
     { id:'dashboard', label:'📊' },
     { id:'inventario', label:`Inventario (${articoli.length})` },
     { id:'vendita', label:'💰 Vendita' },
+    { id:'prenotazioni', label:`📅 Prenotazioni${prenotazioniAttive>0?` (${prenotazioniAttive})`:''}` },
     { id:'storico', label:`📋 Storico (${vendite.length})` },
     { id:'spese', label:`💸 Spese` },
     { id:'aggiungi', label:'+ Aggiungi' },
@@ -207,7 +220,7 @@ export default function InventarioApp() {
         <div style={{ maxWidth:1100, margin:'0 auto' }}>
           <div style={{ padding:'14px 0 0', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
             <div style={{ display:'flex', alignItems:'baseline', gap:10 }}>
-              <h1 style={{ margin:0, fontSize:17, fontWeight:700 }}>🔧 Inventario Idraulica</h1>
+              <h1 style={{ margin:0, fontSize:17, fontWeight:700 }}>🔧 Idraulica Rapisarda</h1>
               {loading && <Spinner />}
             </div>
             <button onClick={()=>setScannerOpen(true)} style={{ padding:'7px 14px', background:C.accentSoft, color:C.accent, border:`1px solid #2a4a7f`, borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer' }}>
@@ -229,6 +242,7 @@ export default function InventarioApp() {
         {tab==='vendita' && <TabVendita articoli={articoli} clienti={clienti} onSold={carica} />}
         {tab==='storico' && <TabStorico vendite={vendite} clienti={clienti} onReload={carica} />}
         {tab==='spese' && <TabSpese spese={spese} onReload={carica} />}
+        {tab==='prenotazioni' && <TabPrenotazioni prenotazioni={prenotazioni} onReload={carica} />}
         {tab==='aggiungi' && <TabAggiungi fornitori={fornitori} zone={zone} initialCodice={initialCodice} onSaved={()=>{ setInitialCodice(''); carica(); setTab('inventario') }} />}
         {tab==='fornitori' && <TabFornitori fornitori={fornitori} onReload={carica} />}
         {tab==='clienti' && <TabClienti clienti={clienti} onReload={carica} />}
@@ -526,7 +540,7 @@ function TabVendita({ articoli, clienti, onSold }: { articoli:Articolo[]; client
   const [note, setNote] = useState('')
   const [scannerOpen, setScannerOpen] = useState(false)
   const [confermando, setConfermando] = useState(false)
-  const [ricevuta, setRicevuta] = useState<{numero:number; totale:number; data:Date; righe:CarrelloItem[]; cliente:string|null; metodo:string} | null>(null)
+  const [ricevuta, setRicevuta] = useState<{numero:number; totale:number; data:Date; righe:CarrelloItem[]; cliente:string|null; metodo:string; telefono?:string} | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const filtrati = useMemo(()=>cerca.length<2?[]:articoli.filter(a=>
@@ -746,7 +760,7 @@ function Ricevuta({ ricevuta, onClose }: { ricevuta:{numero:number; totale:numbe
     const righe = ricevuta.righe.map(r => `• ${r.nome} × ${r.quantita} = € ${(r.quantita * r.prezzo_unitario).toFixed(2)}`).join('\n')
     const metodoLabel = ricevuta.metodo === 'sospeso' ? '⏳ Da pagare a fine lavori' : ricevuta.metodo
     const testo = [
-      `🔧 *Idraulica — Ricevuta N° ${ricevuta.numero}*`,
+      `🔧 *Idraulica Rapisarda — Ricevuta N° ${ricevuta.numero}*`,
       `📅 ${ricevuta.data.toLocaleDateString('it-IT')}`,
       ricevuta.cliente ? `👤 ${ricevuta.cliente}` : '',
       '',
@@ -1570,6 +1584,24 @@ function TabClienti({ clienti, onReload }: { clienti:Cliente[]; onReload:()=>voi
               </div>
               <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
                 {c.telefono && (
+                  <button onClick={async (e)=>{
+                    e.stopPropagation()
+                    let token = c.access_token
+                    if (!token) {
+                      const { data } = await supabase.rpc('rigenera_token_cliente', { p_cliente_id: c.id })
+                      token = data
+                    }
+                    const url = `${window.location.origin}/cliente/${token}`
+                    const msg = `Ciao ${c.nome},\n\nQuesto è il tuo link personale per consultare il catalogo di *Idraulica Rapisarda* e prenotare i pezzi che ti servono:\n\n${url}\n\nSalva il link tra i preferiti del browser. È personale e riservato a te.\n\nA presto! 🔧`
+                    const phone = c.telefono!.replace(/\D/g,'')
+                    window.open(`https://wa.me/${phone.startsWith('39')?phone:'39'+phone}?text=${encodeURIComponent(msg)}`, '_blank')
+                    onReload()
+                  }} title="Invia link personale via WhatsApp"
+                    style={{ padding:'3px 8px', background:'#0f2d1f', color:'#22c55e', border:'1px solid #22c55e44', borderRadius:4, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    📲 Invia link
+                  </button>
+                )}
+                {c.telefono && (
                   <a href={`https://wa.me/${c.telefono.replace(/\D/g,'')}`} target="_blank" rel="noopener noreferrer"
                     style={{ padding:'3px 8px', background:'#0f2d1f', color:'#22c55e', border:'1px solid #22c55e44', borderRadius:4, fontSize:11, textDecoration:'none', fontWeight:600 }}
                     onClick={e=>e.stopPropagation()}
@@ -1625,6 +1657,165 @@ function TabAlert({ articoli }: { articoli:Articolo[] }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB PRENOTAZIONI (admin)
+// ═══════════════════════════════════════════════════════════════════
+function TabPrenotazioni({ prenotazioni, onReload }: { prenotazioni:Prenotazione[]; onReload:()=>void }) {
+  const [filter, setFilter] = useState<'attive'|'completate'|'scadute'|'tutte'>('attive')
+  const [convertModal, setConvertModal] = useState<Prenotazione|null>(null)
+  const [metodoPag, setMetodoPag] = useState<'contanti'|'carta'|'bonifico'|'sospeso'|'altro'>('contanti')
+  const [convertendo, setConvertendo] = useState(false)
+  const [expanded, setExpanded] = useState<string|null>(null)
+
+  const ora = new Date()
+  const filtrate = prenotazioni.filter(p => {
+    if (filter==='attive') return p.stato==='attiva' && new Date(p.data_scadenza) > ora
+    if (filter==='completate') return p.stato==='completata'
+    if (filter==='scadute') return p.stato==='scaduta' || p.stato==='annullata' || (p.stato==='attiva' && new Date(p.data_scadenza) <= ora)
+    return true
+  })
+
+  const converti = async () => {
+    if (!convertModal) return
+    setConvertendo(true)
+    const { error } = await supabase.rpc('converti_prenotazione_vendita', {
+      p_prenotazione_id: convertModal.id,
+      p_metodo_pagamento: metodoPag,
+      p_note: null,
+    })
+    if (error) { alert(`Errore: ${error.message}`); setConvertendo(false); return }
+    setConvertModal(null); setConvertendo(false); onReload()
+  }
+
+  const annulla = async (id:string) => {
+    if (!confirm('Annullare questa prenotazione? I pezzi torneranno disponibili.')) return
+    await supabase.from('prenotazioni').update({ stato:'annullata' }).eq('id', id)
+    onReload()
+  }
+
+  const formatScadenza = (data: string) => {
+    const d = new Date(data)
+    const oggi = new Date(); oggi.setHours(23,59,59,999)
+    const domani = new Date(oggi); domani.setDate(domani.getDate()+1)
+    const haOre = d.getHours() !== 0 || d.getMinutes() !== 0
+    if (d <= oggi) return haOre ? `Oggi alle ${d.toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'})}` : 'Oggi'
+    if (d <= domani) return haOre ? `Domani alle ${d.toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'})}` : 'Domani'
+    return d.toLocaleString('it-IT', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      {/* Filtri */}
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+        {[
+          { v:'attive', l:'Attive', c:C.accent },
+          { v:'completate', l:'Completate', c:C.green },
+          { v:'scadute', l:'Scadute / Annullate', c:C.dim },
+          { v:'tutte', l:'Tutte', c:C.muted },
+        ].map(({v,l,c})=>(
+          <button key={v} onClick={()=>setFilter(v as any)}
+            style={{ padding:'6px 14px', background:filter===v?C.accentSoft:C.surface, border:`1px solid ${filter===v?c:C.border}`, color:filter===v?c:C.muted, borderRadius:5, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {filtrate.length===0 ? (
+        <div style={{ textAlign:'center', color:C.muted, padding:60, fontSize:13 }}>
+          {filter==='attive' ? '✨ Nessuna prenotazione attiva al momento.' : 'Nessuna prenotazione in questa categoria.'}
+        </div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+          {filtrate.map(p => {
+            const isAttiva = p.stato==='attiva' && new Date(p.data_scadenza) > ora
+            const inScadenza = isAttiva && new Date(p.data_scadenza).getTime() - ora.getTime() < 6*3600*1000
+            const isExp = expanded === p.id
+            return (
+              <div key={p.id} style={{ background:isAttiva?(inScadenza?'#1a1500':C.surface):C.surface, border:`1px solid ${isAttiva?(inScadenza?C.orange+'66':C.accent+'44'):C.border}`, borderRadius:6, opacity:p.stato==='annullata'||p.stato==='scaduta'?0.6:1 }}>
+                <div onClick={()=>setExpanded(isExp?null:p.id)} style={{ padding:'10px 12px', display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+                  <div style={{ background:C.accentSoft, color:C.accent, padding:'4px 8px', borderRadius:4, fontSize:11, fontWeight:700, fontFamily:'monospace', flexShrink:0 }}>#{p.numero}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600 }}>{p.clienti?.nome || 'Cliente sconosciuto'}</div>
+                    <div style={{ fontSize:11, color:C.muted, marginTop:2, display:'flex', gap:8, flexWrap:'wrap' }}>
+                      <span>{p.prenotazioni_righe?.length||0} articoli</span>
+                      {isAttiva && <span style={{ color:inScadenza?C.orange:C.accent, fontWeight:600 }}>⏰ Scade {formatScadenza(p.data_scadenza)}</span>}
+                      {p.stato==='completata' && <span style={{ color:C.green }}>✓ Completata</span>}
+                      {p.stato==='scaduta' && <span style={{ color:C.dim }}>Scaduta</span>}
+                      {p.stato==='annullata' && <span style={{ color:C.dim }}>Annullata</span>}
+                    </div>
+                  </div>
+                  <div style={{ textAlign:'right', flexShrink:0 }}>
+                    <div style={{ fontSize:14, fontWeight:700, color:C.green }}>€ {Number(p.totale_stimato).toFixed(2)}</div>
+                  </div>
+                  <span style={{ color:C.dim, fontSize:14 }}>{isExp?'⌃':'⌄'}</span>
+                </div>
+
+                {isExp && (
+                  <div style={{ padding:'0 12px 12px', borderTop:`1px solid ${C.border}` }}>
+                    <div style={{ marginTop:10 }}>
+                      {p.prenotazioni_righe?.map((r,i)=>(
+                        <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:`1px dashed ${C.border}`, fontSize:12 }}>
+                          <div style={{ flex:1 }}>
+                            <div>{r.articolo_nome}</div>
+                            <div style={{ color:C.muted, fontSize:10 }}>{r.quantita} × € {Number(r.prezzo_stimato||0).toFixed(2)}</div>
+                          </div>
+                          <div style={{ fontWeight:700 }}>€ {(r.quantita * Number(r.prezzo_stimato||0)).toFixed(2)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {p.note && <div style={{ marginTop:8, fontSize:11, color:C.muted, fontStyle:'italic' }}>📝 {p.note}</div>}
+                    {p.clienti?.telefono && (
+                      <div style={{ marginTop:8, fontSize:11, color:C.muted }}>
+                        <a href={`tel:${p.clienti.telefono}`} style={{ color:C.accent, textDecoration:'none' }}>📞 {p.clienti.telefono}</a>
+                      </div>
+                    )}
+                    {isAttiva && (
+                      <div style={{ marginTop:12, display:'flex', gap:8, flexWrap:'wrap' }}>
+                        <button onClick={()=>setConvertModal(p)} style={{ ...btnSuccess, padding:'8px 14px', fontSize:11 }}>✓ Cliente ha ritirato (converti in vendita)</button>
+                        <button onClick={()=>annulla(p.id)} style={{ ...btnSecondary, color:C.red, borderColor:C.red+'44', fontSize:11, padding:'8px 12px' }}>🗑 Annulla</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Modal converti in vendita */}
+      {convertModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:900, padding:16 }} onClick={()=>setConvertModal(null)}>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:24, maxWidth:380, width:'100%' }} onClick={e=>e.stopPropagation()}>
+            <h3 style={{ margin:'0 0 8px', fontSize:16 }}>Conferma ritiro</h3>
+            <p style={{ margin:'0 0 16px', fontSize:13, color:C.muted }}>
+              Prenotazione <strong style={{color:C.text}}>#{convertModal.numero}</strong> di <strong style={{color:C.text}}>{convertModal.clienti?.nome}</strong> per <strong style={{color:C.green}}>€ {Number(convertModal.totale_stimato).toFixed(2)}</strong>.
+            </p>
+            <div style={{ marginBottom:14 }}>
+              <label style={labelStyle}>Pagamento</label>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:4, marginTop:4 }}>
+                {METODI_PAGAMENTO.map(m=>(
+                  <button key={m.val} onClick={()=>setMetodoPag(m.val)}
+                    style={{ padding:'8px 4px', background:metodoPag===m.val?C.accentSoft:C.surfaceHi, border:`1px solid ${metodoPag===m.val?C.accent:C.border}`, borderRadius:5, color:metodoPag===m.val?C.accent:C.text, cursor:'pointer', fontSize:10, fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
+                    <span style={{ fontSize:14 }}>{m.icon}</span>
+                    <span>{m.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={()=>setConvertModal(null)} style={{ ...btnSecondary, flex:1 }}>Annulla</button>
+              <button onClick={converti} disabled={convertendo} style={{ ...btnSuccess, flex:1, opacity:convertendo?0.6:1, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                {convertendo ? <><Spinner /> ...</> : '✓ Conferma vendita'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
