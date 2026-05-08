@@ -25,10 +25,11 @@ type ArticoloStats = { id: string; nome: string; categoria: string|null; fornito
 type VenditaGiorno = { giorno: string; numero_vendite: number; fatturato: number; costo_merci: number; margine_lordo: number }
 
 const CATEGORIE = ['Raccordi','Valvole','Tubi e Tubazioni','Guarnizioni e O-ring','Pompe','Filtri','Manometri e Strumenti','Rubinetteria','Giunti','Accessori','Altro']
-const METODI_PAGAMENTO: Array<{val:'contanti'|'carta'|'bonifico'|'altro'; label:string; icon:string}> = [
+const METODI_PAGAMENTO: Array<{val:'contanti'|'carta'|'bonifico'|'sospeso'|'altro'; label:string; icon:string}> = [
   { val:'contanti', label:'Contanti', icon:'💶' },
   { val:'carta', label:'Carta', icon:'💳' },
   { val:'bonifico', label:'Bonifico', icon:'🏦' },
+  { val:'sospeso', label:'Sospeso', icon:'⏳' },
   { val:'altro', label:'Altro', icon:'•' },
 ]
 
@@ -521,7 +522,7 @@ function TabVendita({ articoli, clienti, onSold }: { articoli:Articolo[]; client
   const [cerca, setCerca] = useState('')
   const [clienteId, setClienteId] = useState('')
   const [clienteNomeManuale, setClienteNomeManuale] = useState('')
-  const [metodoPagamento, setMetodoPagamento] = useState<'contanti'|'carta'|'bonifico'|'altro'>('contanti')
+  const [metodoPagamento, setMetodoPagamento] = useState<'contanti'|'carta'|'bonifico'|'sospeso'|'altro'>('contanti')
   const [note, setNote] = useState('')
   const [scannerOpen, setScannerOpen] = useState(false)
   const [confermando, setConfermando] = useState(false)
@@ -587,7 +588,7 @@ function TabVendita({ articoli, clienti, onSold }: { articoli:Articolo[]; client
       p_righe: carrello.map(x=>({ articolo_id:x.articolo_id, quantita:x.quantita, prezzo_unitario:x.prezzo_unitario })),
     })
     if (error) { alert(`Errore: ${error.message}`); setConfermando(false); return }
-    setRicevuta({ numero:(data as any).numero, totale:Number((data as any).totale), data:new Date(), righe:carrello, cliente:nomeCliente, metodo:metodoPagamento })
+    setRicevuta({ numero:(data as any).numero, totale:Number((data as any).totale), data:new Date(), righe:carrello, cliente:nomeCliente, metodo:metodoPagamento, telefono:cliente?.telefono||'' })
     setCarrello([]); setClienteId(''); setClienteNomeManuale(''); setNote(''); setMetodoPagamento('contanti')
     setConfermando(false); onSold()
   }
@@ -738,16 +739,46 @@ function TabVendita({ articoli, clienti, onSold }: { articoli:Articolo[]; client
   )
 }
 
-function Ricevuta({ ricevuta, onClose }: { ricevuta:{numero:number; totale:number; data:Date; righe:CarrelloItem[]; cliente:string|null; metodo:string}; onClose:()=>void }) {
+function Ricevuta({ ricevuta, onClose }: { ricevuta:{numero:number; totale:number; data:Date; righe:CarrelloItem[]; cliente:string|null; metodo:string; telefono?:string}; onClose:()=>void }) {
   const stampa = () => window.print()
+
+  const inviaWhatsApp = () => {
+    const righe = ricevuta.righe.map(r => `• ${r.nome} × ${r.quantita} = € ${(r.quantita * r.prezzo_unitario).toFixed(2)}`).join('\n')
+    const metodoLabel = ricevuta.metodo === 'sospeso' ? '⏳ Da pagare a fine lavori' : ricevuta.metodo
+    const testo = [
+      `🔧 *Idraulica — Ricevuta N° ${ricevuta.numero}*`,
+      `📅 ${ricevuta.data.toLocaleDateString('it-IT')}`,
+      ricevuta.cliente ? `👤 ${ricevuta.cliente}` : '',
+      '',
+      righe,
+      '',
+      `*Totale: € ${ricevuta.totale.toFixed(2)}*`,
+      `Pagamento: ${metodoLabel}`,
+      '',
+      '_Grazie per la fiducia! 🙏_',
+    ].filter(r => r !== undefined).join('\n')
+
+    const phone = ricevuta.telefono ? ricevuta.telefono.replace(/\D/g, '') : ''
+    const url = phone
+      ? `https://wa.me/${phone.startsWith('39') ? phone : '39' + phone}?text=${encodeURIComponent(testo)}`
+      : `https://wa.me/?text=${encodeURIComponent(testo)}`
+    window.open(url, '_blank')
+  }
   return (
     <div style={{ maxWidth:500, margin:'40px auto', animation:'slideUp 0.3s ease' }}>
       <style>{`@media print{body{background:white!important}.no-print{display:none!important}.ricevuta{color:black!important;background:white!important;border:none!important}.ricevuta *{color:black!important}}`}</style>
       <div className="ricevuta" style={{ background:C.surface, border:`2px solid ${C.green}`, borderRadius:12, padding:30 }}>
         <div style={{ textAlign:'center', marginBottom:20 }}>
-          <div style={{ fontSize:48, marginBottom:8 }}>✅</div>
-          <h2 style={{ margin:0, fontSize:18, fontWeight:700, color:C.green }}>Vendita registrata</h2>
+          <div style={{ fontSize:48, marginBottom:8 }}>{ricevuta.metodo==='sospeso' ? '⏳' : '✅'}</div>
+          <h2 style={{ margin:0, fontSize:18, fontWeight:700, color:ricevuta.metodo==='sospeso'?C.orange:C.green }}>
+            {ricevuta.metodo==='sospeso' ? 'Vendita registrata — In sospeso' : 'Vendita registrata'}
+          </h2>
           <div style={{ fontSize:11, color:C.muted, marginTop:6 }}>Documento N° {ricevuta.numero}</div>
+          {ricevuta.metodo==='sospeso' && (
+            <div style={{ marginTop:10, padding:'8px 12px', background:'#3d2a00', border:`1px solid ${C.orange}44`, borderRadius:6, fontSize:12, color:C.orange }}>
+              💡 Il cliente pagherà a fine lavori. Invia la ricevuta su WhatsApp per tenerne traccia.
+            </div>
+          )}
         </div>
         <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:C.muted, marginBottom:16, paddingBottom:12, borderBottom:`1px solid ${C.border}` }}>
           <span>{ricevuta.data.toLocaleString('it-IT')}</span>
@@ -769,7 +800,10 @@ function Ricevuta({ ricevuta, onClose }: { ricevuta:{numero:number; totale:numbe
           <span>TOTALE</span>
           <span style={{ color:C.green }}>€ {ricevuta.totale.toFixed(2)}</span>
         </div>
-        <div className="no-print" style={{ display:'flex', gap:8, marginTop:20 }}>
+        <div className="no-print" style={{ display:'flex', gap:8, marginTop:20, flexWrap:'wrap' }}>
+          <button onClick={inviaWhatsApp} style={{ ...btnSuccess, flex:1, background:'#25d366', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+            💬 WhatsApp
+          </button>
           <button onClick={stampa} style={{ ...btnSecondary, flex:1 }}>🖨 Stampa</button>
           <button onClick={onClose} style={{ ...btnPrimary, flex:1 }}>Nuova vendita</button>
         </div>
@@ -840,9 +874,15 @@ function TabStorico({ vendite, clienti, onReload }: { vendite:Vendita[]; clienti
           <div style={{ fontSize:18, fontWeight:700, color:C.accent }}>{numero}</div>
         </div>
         <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 14px' }}>
-          <div style={labelStyle}>Fatturato</div>
-          <div style={{ fontSize:18, fontWeight:700, color:C.green }}>€ {totale.toFixed(2)}</div>
+          <div style={labelStyle}>Incassato</div>
+          <div style={{ fontSize:18, fontWeight:700, color:C.green }}>€ {filtrate.filter(v=>v.metodo_pagamento!=='sospeso').reduce((s,v)=>s+Number(v.totale),0).toFixed(2)}</div>
         </div>
+        {filtrate.some(v=>v.metodo_pagamento==='sospeso') && (
+          <div style={{ background:'#1a1500', border:`1px solid ${C.orange}44`, borderRadius:8, padding:'12px 14px' }}>
+            <div style={{ ...labelStyle, color:C.orange }}>⏳ Da incassare</div>
+            <div style={{ fontSize:18, fontWeight:700, color:C.orange }}>€ {filtrate.filter(v=>v.metodo_pagamento==='sospeso').reduce((s,v)=>s+Number(v.totale),0).toFixed(2)}</div>
+          </div>
+        )}
         <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 14px' }}>
           <div style={labelStyle}>Scontrino medio</div>
           <div style={{ fontSize:18, fontWeight:700, color:C.purple }}>€ {numero>0?(totale/numero).toFixed(2):'0.00'}</div>
@@ -860,7 +900,7 @@ function TabStorico({ vendite, clienti, onReload }: { vendite:Vendita[]; clienti
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
           {filtrate.map(v=>(
-            <div key={v.id} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:6 }}>
+            <div key={v.id} style={{ background:v.metodo_pagamento==='sospeso'?'#1a1500':C.surface, border:`1px solid ${v.metodo_pagamento==='sospeso'?C.orange+'55':C.border}`, borderRadius:6 }}>
               <div onClick={()=>setExpanded(expanded===v.id?null:v.id)} style={{ padding:'10px 12px', display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
                 <div style={{ background:C.accentSoft, color:C.accent, padding:'4px 8px', borderRadius:4, fontSize:11, fontWeight:700, fontFamily:'monospace', flexShrink:0 }}>#{v.numero}</div>
                 <div style={{ flex:1, minWidth:0 }}>
@@ -872,7 +912,8 @@ function TabStorico({ vendite, clienti, onReload }: { vendite:Vendita[]; clienti
                   </div>
                 </div>
                 <div style={{ textAlign:'right', flexShrink:0 }}>
-                  <div style={{ fontSize:14, fontWeight:700, color:C.green }}>€ {Number(v.totale).toFixed(2)}</div>
+                  <div style={{ fontSize:14, fontWeight:700, color:v.metodo_pagamento==='sospeso'?C.orange:C.green }}>€ {Number(v.totale).toFixed(2)}</div>
+                  {v.metodo_pagamento==='sospeso' && <div style={{ fontSize:10, color:C.orange, marginTop:2 }}>⏳ da incassare</div>}
                 </div>
                 <span style={{ color:C.dim, fontSize:14 }}>{expanded===v.id?'⌃':'⌄'}</span>
               </div>
