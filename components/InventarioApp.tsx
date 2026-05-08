@@ -165,6 +165,15 @@ export default function InventarioApp() {
 
   const handleBarcode = (code: string) => {
     setScannerOpen(false)
+    // Controlla se è un QR code dell'app (URL tipo .../articolo/uuid)
+    const urlMatch = code.match(/\/articolo\/([0-9a-f-]{36})/i)
+    if (urlMatch) {
+      const id = urlMatch[1]
+      const found = articoli.find(a => a.id === id)
+      setScanResult({ found: !!found, articolo: found, codice: id })
+      return
+    }
+    // Altrimenti è un barcode → cerca per codice articolo
     const found = articoli.find(a => a.codice === code)
     setScanResult({ found: !!found, articolo: found, codice: code })
   }
@@ -585,7 +594,16 @@ function TabVendita({ articoli, clienti, onSold }: { articoli:Articolo[]; client
 
   const handleBarcode = (code:string) => {
     setScannerOpen(false)
-    const a = articoli.find(x=>x.codice===code)
+    // QR code dell'app (URL .../articolo/uuid) → cerca per ID
+    const urlMatch = code.match(/\/articolo\/([0-9a-f-]{36})/i)
+    if (urlMatch) {
+      const a = articoli.find(x => x.id === urlMatch[1])
+      if (a) aggiungi(a)
+      else alert('Articolo non trovato nel database.')
+      return
+    }
+    // Barcode → cerca per codice articolo
+    const a = articoli.find(x => x.codice === code)
     if (a) aggiungi(a)
     else alert(`Codice ${code} non trovato in inventario.`)
   }
