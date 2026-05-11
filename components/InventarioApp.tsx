@@ -1438,7 +1438,7 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { item:Art
     </div>
   )
 }
- ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // TAB AGGIUNGI
 // ═══════════════════════════════════════════════════════════════════
 function TabAggiungi({ fornitori, zone, initialCodice, onSaved }: { fornitori:Fornitore[]; zone:Zona[]; initialCodice:string; onSaved:()=>void }) {
