@@ -3,6 +3,7 @@ import { QRModal } from './QRModal'
 import { BarcodeScanner } from './BarcodeScanner'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
+import ImageUpload from './ImageUpload'
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -1292,9 +1293,14 @@ function QuickEdit({ articolo, onClose, onSaved }: { articolo:Articolo; onClose:
 // ═══════════════════════════════════════════════════════════════════
 // ARTICOLO DETAIL + EDIT (con log movimenti)
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// ARTICOLO DETAIL + EDIT (con log movimenti e upload immagine)
+// Sostituire l'intera function "ArticoloDetail" dentro InventarioApp.tsx con questa.
+// ═══════════════════════════════════════════════════════════════════
 function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { item:Articolo; fornitori:Fornitore[]; zone:Zona[]; onClose:()=>void; onReload:()=>void }) {
   const [editMode, setEditMode] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [fotoUrl, setFotoUrl] = useState<string|null>(item.foto_url ?? null)
   const [form, setForm] = useState({
     nome:item.nome||'', codice:item.codice||'', categoria:item.categoria||'', descrizione:item.descrizione||'', utilizzo:item.utilizzo||'',
     posizione:item.posizione||'', zona_id:item.zona_id||'', fornitore_id:item.fornitore_id||'',
@@ -1307,13 +1313,25 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { item:Art
     if (!form.nome) return
     setSaving(true)
     const nuovaQty = Number(form.quantita)
-    const { error } = await supabase.from('articoli').update(sanitize(form)).eq('id',item.id)
+    const { error } = await supabase.from('articoli').update({ ...sanitize(form), foto_url: fotoUrl }).eq('id',item.id)
     if (error) { alert(`Errore: ${error.message}`); setSaving(false); return }
     if (nuovaQty !== item.quantita) {
       const diff = nuovaQty - item.quantita
       await supabase.from('movimenti').insert({ articolo_id:item.id, tipo:diff>0?'entrata':'uscita', quantita:Math.abs(diff), quantita_precedente:item.quantita, quantita_dopo:nuovaQty, note:'Modifica manuale' })
     }
     setSaving(false); onReload()
+  }
+
+  const annullaEdit = () => {
+    // Ripristino tutti i campi inclusa la foto, così "Annulla" davvero annulla
+    setFotoUrl(item.foto_url ?? null)
+    setForm({
+      nome:item.nome||'', codice:item.codice||'', categoria:item.categoria||'', descrizione:item.descrizione||'', utilizzo:item.utilizzo||'',
+      posizione:item.posizione||'', zona_id:item.zona_id||'', fornitore_id:item.fornitore_id||'',
+      prezzo_acquisto:item.prezzo_acquisto?.toString()||'', prezzo_vendita:item.prezzo_vendita?.toString()||'',
+      quantita:item.quantita?.toString()||'0', soglia_riordino:item.soglia_riordino?.toString()||'1', note:item.note||'',
+    })
+    setEditMode(false)
   }
 
   const elimina = async () => {
@@ -1332,7 +1350,25 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { item:Art
       </div>
 
       <div style={{ display:'flex', gap:18, flexWrap:'wrap' }}>
-        {item.foto_url && <img src={item.foto_url} alt={item.nome} style={{ width:160, height:160, objectFit:'cover', borderRadius:8, border:`1px solid ${C.border}`, flexShrink:0 }} />}
+        {/* Colonna sinistra: immagine (sola lettura) o uploader (in edit) */}
+        {editMode ? (
+          <div style={{ width:200, flexShrink:0 }}>
+            <ImageUpload
+              articoloId={item.id}
+              currentUrl={fotoUrl}
+              onChange={setFotoUrl}
+            />
+          </div>
+        ) : (
+          item.foto_url && (
+            <img
+              src={item.foto_url}
+              alt={item.nome}
+              style={{ width:160, height:160, objectFit:'cover', borderRadius:8, border:`1px solid ${C.border}`, flexShrink:0 }}
+            />
+          )
+        )}
+
         <div style={{ flex:1, minWidth:280 }}>
           {editMode ? (
             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
@@ -1368,7 +1404,7 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { item:Art
                 <button onClick={salva} disabled={saving||!form.nome} style={{ ...btnPrimary, opacity: saving||!form.nome ? 0.6 : 1, display:'flex', alignItems:'center', gap:8 }}>
                   {saving?<><Spinner /> Salvo...</>:'✓ Salva'}
                 </button>
-                <button onClick={()=>setEditMode(false)} style={btnSecondary}>Annulla</button>
+                <button onClick={annullaEdit} style={btnSecondary}>Annulla</button>
                 <button onClick={elimina} style={{ ...btnSecondary, color:C.red, borderColor:C.red+'44', marginLeft:'auto' }}>🗑</button>
               </div>
             </div>
@@ -1402,8 +1438,7 @@ function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { item:Art
     </div>
   )
 }
-
-// ═══════════════════════════════════════════════════════════════════
+ ═══════════════════════════════════════════════════════════════════
 // TAB AGGIUNGI
 // ═══════════════════════════════════════════════════════════════════
 function TabAggiungi({ fornitori, zone, initialCodice, onSaved }: { fornitori:Fornitore[]; zone:Zona[]; initialCodice:string; onSaved:()=>void }) {
