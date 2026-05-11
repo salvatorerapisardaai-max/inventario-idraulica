@@ -1291,150 +1291,264 @@ function QuickEdit({ articolo, onClose, onSaved }: { articolo:Articolo; onClose:
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ARTICOLO DETAIL + EDIT (con log movimenti)
+// ARTICOLO DETAIL + EDIT (versione migliorata)
 // ═══════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════
-// ARTICOLO DETAIL + EDIT (con log movimenti e upload immagine)
-// Sostituire l'intera function "ArticoloDetail" dentro InventarioApp.tsx con questa.
-// ═══════════════════════════════════════════════════════════════════
-function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { item:Articolo; fornitori:Fornitore[]; zone:Zona[]; onClose:()=>void; onReload:()=>void }) {
+function ArticoloDetail({ item, fornitori, zone, onClose, onReload }: { 
+  item: Articolo; 
+  fornitori: Fornitore[]; 
+  zone: Zona[]; 
+  onClose: () => void; 
+  onReload: () => void 
+}) {
   const [editMode, setEditMode] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [fotoUrl, setFotoUrl] = useState<string|null>(item.foto_url ?? null)
+  const [fotoUrl, setFotoUrl] = useState<string | null>(item.foto_url ?? null)
+  const [feedback, setFeedback] = useState<string>('')
+
   const [form, setForm] = useState({
-    nome:item.nome||'', codice:item.codice||'', categoria:item.categoria||'', descrizione:item.descrizione||'', utilizzo:item.utilizzo||'',
-    posizione:item.posizione||'', zona_id:item.zona_id||'', fornitore_id:item.fornitore_id||'',
-    prezzo_acquisto:item.prezzo_acquisto?.toString()||'', prezzo_vendita:item.prezzo_vendita?.toString()||'',
-    quantita:item.quantita?.toString()||'0', soglia_riordino:item.soglia_riordino?.toString()||'1', note:item.note||'',
+    nome: item.nome || '',
+    codice: item.codice || '',
+    categoria: item.categoria || '',
+    descrizione: item.descrizione || '',
+    utilizzo: item.utilizzo || '',
+    posizione: item.posizione || '',
+    zona_id: item.zona_id || '',
+    fornitore_id: item.fornitore_id || '',
+    prezzo_acquisto: item.prezzo_acquisto?.toString() || '',
+    prezzo_vendita: item.prezzo_vendita?.toString() || '',
+    quantita: item.quantita?.toString() || '0',
+    soglia_riordino: item.soglia_riordino?.toString() || '1',
+    note: item.note || '',
   })
-  const set = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const salva = async () => {
     if (!form.nome) return
     setSaving(true)
+    setFeedback('')
+
+    const { error } = await supabase
+      .from('articoli')
+      .update({ ...sanitize(form), foto_url: fotoUrl })
+      .eq('id', item.id)
+
+    if (error) {
+      setFeedback(`Errore: ${error.message}`)
+      setSaving(false)
+      return
+    }
+
+    // Aggiorna quantità con movimento se necessario
     const nuovaQty = Number(form.quantita)
-    const { error } = await supabase.from('articoli').update({ ...sanitize(form), foto_url: fotoUrl }).eq('id',item.id)
-    if (error) { alert(`Errore: ${error.message}`); setSaving(false); return }
     if (nuovaQty !== item.quantita) {
       const diff = nuovaQty - item.quantita
-      await supabase.from('movimenti').insert({ articolo_id:item.id, tipo:diff>0?'entrata':'uscita', quantita:Math.abs(diff), quantita_precedente:item.quantita, quantita_dopo:nuovaQty, note:'Modifica manuale' })
+      await supabase.from('movimenti').insert({
+        articolo_id: item.id,
+        tipo: diff > 0 ? 'entrata' : 'uscita',
+        quantita: Math.abs(diff),
+        quantita_precedente: item.quantita,
+        quantita_dopo: nuovaQty,
+        note: 'Modifica manuale',
+      })
     }
-    setSaving(false); onReload()
+
+    setSaving(false)
+    setFeedback('✅ Salvato correttamente')
+    setTimeout(() => setFeedback(''), 2500)
+    onReload()
   }
 
   const annullaEdit = () => {
-    // Ripristino tutti i campi inclusa la foto, così "Annulla" davvero annulla
     setFotoUrl(item.foto_url ?? null)
     setForm({
-      nome:item.nome||'', codice:item.codice||'', categoria:item.categoria||'', descrizione:item.descrizione||'', utilizzo:item.utilizzo||'',
-      posizione:item.posizione||'', zona_id:item.zona_id||'', fornitore_id:item.fornitore_id||'',
-      prezzo_acquisto:item.prezzo_acquisto?.toString()||'', prezzo_vendita:item.prezzo_vendita?.toString()||'',
-      quantita:item.quantita?.toString()||'0', soglia_riordino:item.soglia_riordino?.toString()||'1', note:item.note||'',
+      nome: item.nome || '', codice: item.codice || '', categoria: item.categoria || '',
+      descrizione: item.descrizione || '', utilizzo: item.utilizzo || '',
+      posizione: item.posizione || '', zona_id: item.zona_id || '',
+      fornitore_id: item.fornitore_id || '',
+      prezzo_acquisto: item.prezzo_acquisto?.toString() || '',
+      prezzo_vendita: item.prezzo_vendita?.toString() || '',
+      quantita: item.quantita?.toString() || '0',
+      soglia_riordino: item.soglia_riordino?.toString() || '1',
+      note: item.note || '',
     })
     setEditMode(false)
+    setFeedback('')
   }
 
-  const elimina = async () => {
-    if (!confirm(`Eliminare "${item.nome}"?`)) return
-    await supabase.from('articoli').delete().eq('id',item.id); onReload()
-  }
-
-  const margine = item.prezzo_acquisto && item.prezzo_vendita && item.prezzo_acquisto>0 ? (((item.prezzo_vendita-item.prezzo_acquisto)/item.prezzo_acquisto)*100).toFixed(1) : null
+  const margine = item.prezzo_acquisto && item.prezzo_vendita && item.prezzo_acquisto > 0 
+    ? (((item.prezzo_vendita - item.prezzo_acquisto) / item.prezzo_acquisto) * 100).toFixed(1) 
+    : null
 
   return (
     <div>
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:18 }}>
-        <button onClick={onClose} style={{ ...btnSecondary, padding:'7px 12px' }}>← Indietro</button>
-        <h2 style={{ margin:0, fontSize:15, fontWeight:700, flex:1 }}>{item.nome}</h2>
-        {!editMode && <button onClick={()=>setEditMode(true)} style={btnPrimary}>✏ Modifica</button>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+        <button onClick={onClose} style={{ ...btnSecondary, padding: '8px 14px' }}>← Indietro</button>
+        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, flex: 1 }}>{item.nome}</h2>
+        
+        {!editMode ? (
+          <button onClick={() => setEditMode(true)} style={btnPrimary}>✏ Modifica</button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={salva} disabled={saving} style={{ ...btnPrimary, background: C.green }}>
+              {saving ? <Spinner /> : '💾 Salva'}
+            </button>
+            <button onClick={annullaEdit} style={btnSecondary}>Annulla</button>
+          </div>
+        )}
       </div>
 
-      <div style={{ display:'flex', gap:18, flexWrap:'wrap' }}>
-        {/* Colonna sinistra: immagine (sola lettura) o uploader (in edit) */}
-        {editMode ? (
-          <div style={{ width:200, flexShrink:0 }}>
+      {feedback && (
+        <div style={{ 
+          padding: '10px 14px', 
+          background: feedback.includes('✅') ? '#1a3a1a' : '#3a1a1a', 
+          color: feedback.includes('✅') ? C.green : C.red, 
+          borderRadius: 8, 
+          marginBottom: 16,
+          fontSize: 13 
+        }}>
+          {feedback}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+        {/* ====================== SEZIONE IMMAGINE ====================== */}
+        <div style={{ width: 220, flexShrink: 0 }}>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Foto Articolo
+          </div>
+          
+          {editMode ? (
             <ImageUpload
               articoloId={item.id}
               currentUrl={fotoUrl}
               onChange={setFotoUrl}
             />
-          </div>
-        ) : (
-          item.foto_url && (
-            <img
-              src={item.foto_url}
-              alt={item.nome}
-              style={{ width:160, height:160, objectFit:'cover', borderRadius:8, border:`1px solid ${C.border}`, flexShrink:0 }}
-            />
-          )
-        )}
+          ) : (
+            <div style={{ 
+              width: '100%', 
+              aspectRatio: '1 / 1', 
+              background: '#1a1a1a', 
+              borderRadius: 12, 
+              overflow: 'hidden',
+              border: `1px solid ${C.border}`
+            }}>
+              {item.foto_url ? (
+                <img 
+                  src={item.foto_url} 
+                  alt={item.nome} 
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                />
+              ) : (
+                <div style={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  color: C.dim,
+                  fontSize: 48 
+                }}>
+                  🖼️
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-        <div style={{ flex:1, minWidth:280 }}>
+        {/* ====================== SEZIONE DATI ====================== */}
+        <div style={{ flex: 1, minWidth: 300 }}>
           {editMode ? (
-            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              <div style={{ display:'flex', gap:8 }}>
-                <Field label="Nome *" flex={3}><input value={form.nome} onChange={e=>set('nome',e.target.value)} style={inp} /></Field>
-                <Field label="Codice" flex={1}><input value={form.codice} onChange={e=>set('codice',e.target.value)} style={inp} /></Field>
+            /* Form modifica */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Field label="Nome *" flex={3}>
+                  <input value={form.nome} onChange={e => set('nome', e.target.value)} style={inp} />
+                </Field>
+                <Field label="Codice" flex={1}>
+                  <input value={form.codice} onChange={e => set('codice', e.target.value)} style={inp} />
+                </Field>
               </div>
-              <div style={{ display:'flex', gap:8 }}>
+
+              <div style={{ display: 'flex', gap: 10 }}>
                 <Field label="Categoria">
-                  <select value={form.categoria} onChange={e=>set('categoria',e.target.value)} style={sel}>
+                  <select value={form.categoria} onChange={e => set('categoria', e.target.value)} style={sel}>
                     <option value="">— Scegli —</option>
-                    {CATEGORIE.map(c=><option key={c} value={c}>{c}</option>)}
+                    {CATEGORIE.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </Field>
                 <Field label="Fornitore">
-                  <select value={form.fornitore_id} onChange={e=>set('fornitore_id',e.target.value)} style={sel}>
+                  <select value={form.fornitore_id} onChange={e => set('fornitore_id', e.target.value)} style={sel}>
                     <option value="">— Nessuno —</option>
-                    {fornitori.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+                    {fornitori.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
                 </Field>
               </div>
-              <Field label="Zona"><ZoneSelect value={form.zona_id} onChange={v=>set('zona_id',v)} zone={zone} /></Field>
-              <Field label="Posizione"><input value={form.posizione} onChange={e=>set('posizione',e.target.value)} style={inp} /></Field>
-              <Field label="Descrizione"><input value={form.descrizione} onChange={e=>set('descrizione',e.target.value)} style={inp} /></Field>
-              <Field label="Utilizzo"><input value={form.utilizzo} onChange={e=>set('utilizzo',e.target.value)} style={inp} /></Field>
-              <div style={{ display:'flex', gap:8 }}>
-                {[['Quantità','quantita','0','1'],['Soglia','soglia_riordino','1','1'],['€ Acq.','prezzo_acquisto','0','0.01'],['€ Vend.','prezzo_vendita','0','0.01']].map(([l,k,p,s])=>(
-                  <Field key={k} label={l}><input type="number" step={s} min="0" value={form[k as keyof typeof form]} onChange={e=>set(k,e.target.value)} placeholder={p} style={inp} /></Field>
+
+              <Field label="Zona">
+                <ZoneSelect value={form.zona_id} onChange={v => set('zona_id', v)} zone={zone} />
+              </Field>
+
+              <Field label="Posizione">
+                <input value={form.posizione} onChange={e => set('posizione', e.target.value)} style={inp} placeholder="es. Ripiano A3" />
+              </Field>
+
+              <Field label="Descrizione"><input value={form.descrizione} onChange={e => set('descrizione', e.target.value)} style={inp} /></Field>
+              <Field label="Utilizzo"><input value={form.utilizzo} onChange={e => set('utilizzo', e.target.value)} style={inp} /></Field>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {[
+                  ['Quantità', 'quantita'],
+                  ['Soglia Riordino', 'soglia_riordino'],
+                  ['€ Acquisto', 'prezzo_acquisto'],
+                  ['€ Vendita', 'prezzo_vendita']
+                ].map(([label, key]) => (
+                  <Field key={key} label={label}>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      value={form[key as keyof typeof form]} 
+                      onChange={e => set(key, e.target.value)} 
+                      style={inp} 
+                    />
+                  </Field>
                 ))}
               </div>
-              <Field label="Note"><textarea value={form.note} onChange={e=>set('note',e.target.value)} rows={2} style={{ ...inp, resize:'vertical' }} /></Field>
-              <div style={{ display:'flex', gap:8 }}>
-                <button onClick={salva} disabled={saving||!form.nome} style={{ ...btnPrimary, opacity: saving||!form.nome ? 0.6 : 1, display:'flex', alignItems:'center', gap:8 }}>
-                  {saving?<><Spinner /> Salvo...</>:'✓ Salva'}
-                </button>
-                <button onClick={annullaEdit} style={btnSecondary}>Annulla</button>
-                <button onClick={elimina} style={{ ...btnSecondary, color:C.red, borderColor:C.red+'44', marginLeft:'auto' }}>🗑</button>
-              </div>
+
+              <Field label="Note">
+                <textarea value={form.note} onChange={e => set('note', e.target.value)} rows={3} style={{ ...inp, resize: 'vertical' }} />
+              </Field>
             </div>
           ) : (
-            <div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
-                {[
-                  ['Categoria', item.categoria&&<Tag label={item.categoria}/>],
-                  ['Codice', item.codice],
-                  ['Fornitore', (item as any).fornitori?.nome],
-                  ['Zona', (item as any).zona_path||(item as any).zona_nome],
-                  ['Posizione', item.posizione],
-                  ['Descrizione', item.descrizione],
-                  ['Utilizzo', item.utilizzo],
-                  ['€ Acquisto', item.prezzo_acquisto?`€ ${Number(item.prezzo_acquisto).toFixed(2)}`:null],
-                  ['€ Vendita', item.prezzo_vendita?`€ ${Number(item.prezzo_vendita).toFixed(2)}`:null],
-                  ['Margine', margine?`${margine}%`:null],
-                  ['Note', item.note],
-                ].filter(([,v])=>v).map(([label,val])=>(
-                  <div key={String(label)}><div style={labelStyle}>{label}</div><div style={{ fontSize:13 }}>{val}</div></div>
-                ))}
-              </div>
-              <div style={{ background:C.surfaceHi, border:`1px solid ${C.border}`, borderRadius:6, padding:'12px 14px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <div><div style={labelStyle}>Stock attuale</div><span style={badge(item.quantita,item.soglia_riordino)}>{item.quantita} pz — {item.quantita<=item.soglia_riordino?'⚠ Sotto soglia':'OK'}</span></div>
-                <div style={{ textAlign:'right' }}><div style={labelStyle}>Soglia</div><span style={{ fontSize:13 }}>{item.soglia_riordino} pz</span></div>
-              </div>
+            /* Modalità visualizzazione */
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              {[
+                ['Categoria', item.categoria && <Tag label={item.categoria} />],
+                ['Codice', item.codice],
+                ['Fornitore', (item as any).fornitori?.nome],
+                ['Zona', (item as any).zona_path || (item as any).zona_nome],
+                ['Posizione', item.posizione],
+                ['Descrizione', item.descrizione],
+                ['Utilizzo', item.utilizzo],
+                ['Prezzo Acquisto', item.prezzo_acquisto ? `€ ${Number(item.prezzo_acquisto).toFixed(2)}` : null],
+                ['Prezzo Vendita', item.prezzo_vendita ? `€ ${Number(item.prezzo_vendita).toFixed(2)}` : null],
+                ['Margine', margine ? `${margine}%` : null],
+                ['Note', item.note],
+              ].filter(([, v]) => v).map(([label, val]) => (
+                <div key={String(label)}>
+                  <div style={labelStyle}>{label}</div>
+                  <div style={{ fontSize: 14, lineHeight: 1.4 }}>{val}</div>
+                </div>
+              ))}
             </div>
           )}
         </div>
       </div>
+
+      {!editMode && (
+        <div style={{ marginTop: 20, padding: 14, background: C.surfaceHi, borderRadius: 8, fontSize: 13 }}>
+          Clicca su <strong>✏ Modifica</strong> per aggiungere o cambiare la foto dell'articolo.
+        </div>
+      )}
     </div>
   )
 }
