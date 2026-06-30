@@ -1,14 +1,13 @@
 // =============================================================================
-//  app/fatture/azioni.ts — Server Actions per la fatturazione.
-//
-//  Usa il client Supabase a cookie (@supabase/ssr): la sessione dell'utente
-//  loggato fa passare la RLS. Oggi trasmette col MockGateway; al Passo 4 si
-//  sostituisce una sola riga con ArubaGateway.
+//  app/fatture/azioni.ts
+//  Server Actions per il ciclo ATTIVO (vendita).
+//  Client Supabase costruito inline con @supabase/ssr (nessun helper esterno).
 // =============================================================================
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { emettiFattura } from '@/lib/fattura/emettiFattura';
 import { PersistenzaSupabase } from '@/lib/fattura/persistenzaSupabase';
 import { MockGateway } from '@/lib/fattura/gateway';
@@ -21,6 +20,29 @@ import type { RigaFattura } from '@/lib/fattura/generaXmlFattura';
 // oppure IVA inclusa (lordo) -> true.  Default: netto.
 const PREZZI_IVA_INCLUSA = false;
 
+// --- helper interno per il client Supabase lato server -----------------
+async function getSupabase() {
+  const cookieStore = await cookies(); // Next 15: await. Next 14: togli await.
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll(); },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            );
+          } catch {
+            // chiamato da Server Component: ok, refresh lo fa il middleware
+          }
+        },
+      },
+    },
+  );
+}
+
 export interface EsitoAzione {
   ok: boolean;
   errore?: string;
@@ -31,12 +53,12 @@ export interface EsitoAzione {
 }
 
 export async function emettiFatturaDaVendita(venditaId: string): Promise<EsitoAzione> {
-  const supabase = await createClient();
+  const supabase = await getSupabase();
 
   // 1) emittente
   const { data: azienda, error: eA } = await supabase
     .from('azienda').select('*').limit(1).maybeSingle();
-  if (eA) throw eA;
+  if (eA) return { ok: false, errore: eA.message };
   if (!azienda) {
     return { ok: false, errore: "Dati azienda mancanti: configura prima l'anagrafica della ditta." };
   }
@@ -44,21 +66,21 @@ export async function emettiFatturaDaVendita(venditaId: string): Promise<EsitoAz
   // 2) vendita + cliente
   const { data: vendita, error: eV } = await supabase
     .from('vendite').select('*').eq('id', venditaId).single();
-  if (eV) throw eV;
+  if (eV) return { ok: false, errore: eV.message };
   if (!vendita.cliente_id) {
     return { ok: false, errore: 'La vendita non ha un cliente associato (obbligatorio per la fattura elettronica).' };
   }
 
   const { data: cliente, error: eC } = await supabase
     .from('clienti').select('*').eq('id', vendita.cliente_id).single();
-  if (eC) throw eC;
+  if (eC) return { ok: false, errore: eC.message };
 
   // 3) righe (con aliquota presa dall'articolo, altrimenti default azienda)
   const { data: righeV, error: eR } = await supabase
     .from('vendite_righe')
     .select('articolo_nome, quantita, prezzo_unitario, articoli(aliquota_iva)')
     .eq('vendita_id', venditaId);
-  if (eR) throw eR;
+  if (eR) return { ok: false, errore: eR.message };
   if (!righeV?.length) return { ok: false, errore: 'La vendita non ha righe.' };
 
   const aliquotaDefault = Number(azienda.aliquota_iva_default ?? 22);
@@ -69,7 +91,7 @@ export async function emettiFatturaDaVendita(venditaId: string): Promise<EsitoAz
       ? Number(r.articoli.aliquota_iva) * 100
       : aliquotaDefault;
     let prezzo = Number(r.prezzo_unitario);
-    if (PREZZI_IVA_INCLUSA) prezzo = prezzo / (1 + aliquota / 100); // scorpora l'IVA
+    if (PREZZI_IVA_INCLUSA) prezzo = prezzo / (1 + aliquota / 100);
     return {
       descrizione: r.articolo_nome,
       quantita: Number(r.quantita),
