@@ -1,20 +1,41 @@
 // =============================================================================
-//  app/fatture-acquisto/[id]/page.tsx
-//  Dettaglio: rivedi righe, modifica articolo / markup, registra (carica magazzino).
+//  app/fatture-acquisto/[id]/page.tsx — Dettaglio fattura di acquisto.
+//  Client Supabase inline.
 // =============================================================================
-import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import { notFound } from 'next/navigation';
 import RigheRevisione from './RigheRevisione';
 import RegistraButton from './RegistraButton';
-import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
+
+async function getSupabase() {
+  const cookieStore = await cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll(); },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            );
+          } catch {}
+        },
+      },
+    },
+  );
+}
 
 const euro = (n: number | null) =>
   n == null ? '—' : new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
 
 export default async function DettaglioAcquisto({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
+  const supabase = await getSupabase();
 
   const { data: fattura } = await supabase
     .from('fatture_acquisto')
@@ -28,7 +49,6 @@ export default async function DettaglioAcquisto({ params }: { params: Promise<{ 
     .eq('fattura_acquisto_id', id)
     .order('numero_linea');
 
-  // articoli per la combo di mapping
   const { data: articoli } = await supabase
     .from('articoli').select('id, nome, codice, prezzo_acquisto, usa_markup_auto').order('nome');
 
