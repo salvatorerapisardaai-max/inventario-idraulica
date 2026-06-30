@@ -126,7 +126,9 @@ function ZoneSelect({ value, onChange, zone }: { value:string; onChange:(v:strin
   )
 }
 
+// ═══════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPALE
+// ═══════════════════════════════════════════════════════════════════
 export default function InventarioApp() {
   const [tab, setTab] = useState<'dashboard'|'inventario'|'vendita'|'storico'|'spese'|'prenotazioni'|'aggiungi'|'fornitori'|'clienti'|'alert'|'fatture'>('inventario')
   const [articoli, setArticoli] = useState<Articolo[]>([])
@@ -221,7 +223,7 @@ export default function InventarioApp() {
         </div>
       </div>
 
-      {/* Content */}
+      {/* Content Area */}
       <div style={{ maxWidth:1100, margin:'0 auto', padding:'20px 16px' }}>
         {tab==='dashboard' && <TabDashboard articoli={articoli} fornitori={fornitori} stats={stats} trend={trend} vendite={vendite} spese={spese} />}
         {tab==='inventario' && <TabInventario articoli={articoli} fornitori={fornitori} zone={zone} onReload={carica} />}
@@ -236,11 +238,9 @@ export default function InventarioApp() {
         {tab==='alert' && <TabAlert articoli={articoli} />}
       </div>
 
-      {/* Scanner */}
-      {scannerOpen && <BarcodeScanner onDetected={(code) => { setScannerOpen(false); /* handleBarcode logic */ }} onClose={()=>setScannerOpen(false)} />}
-
-      {/* Risultato scan (mantieni la logica originale) */}
-      {scanResult && ( /* ... mantieni il codice del modal scanResult dal tuo file originale ... */ )}
+      {/* Scanner e Scan Result (copia dal tuo originale) */}
+      {scannerOpen && <BarcodeScanner onDetected={() => {}} onClose={()=>setScannerOpen(false)} />}
+      {scanResult && <div>{/* mantieni il modal scanResult dal tuo file */}</div>}
     </div>
   )
 }
@@ -249,10 +249,13 @@ export default function InventarioApp() {
 function TabFatture({ vendite, onReload }: { vendite: Vendita[]; onReload: () => void }) {
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px', fontSize: 18 }}>📄 Gestione Fatture</h2>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
-        <p>Esporta i dati delle vendite per Fatture in Cloud.</p>
-        <button onClick={() => exportVenditeCSV(vendite, '2025-01-01', new Date().toISOString().split('T')[0])} style={btnPrimary}>
+      <h2 style={{ marginBottom: 20, fontSize: 18 }}>📄 Gestione Fatture</h2>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24 }}>
+        <p>Esporta i dati per Fatture in Cloud.</p>
+        <button 
+          onClick={() => exportVenditeCSV(vendite, '2025-01-01', new Date().toISOString().split('T')[0])} 
+          style={btnPrimary}
+        >
           📥 Esporta CSV per Fatture
         </button>
       </div>
@@ -260,7 +263,8 @@ function TabFatture({ vendite, onReload }: { vendite: Vendita[]; onReload: () =>
   )
 }
 
-// Incolla qui sotto tutti gli altri Tab (TabDashboard, TabInventario, TabVendita, TabStorico, TabSpese, TabPrenotazioni, TabAggiungi, TabFornitori, TabClienti, TabAlert, QuickEdit, ArticoloDetail, Ricevuta, TrendChart, KpiCard) esattamente come nel tuo file originale.
+// === Incolla qui sotto tutti gli altri Tab (TabDashboard, TabInventario, ecc.) dal tuo file originale ===
+// (dal punto in cui inizia "function TabDashboard..." fino alla fine del file)
 
 
 // ═══════════════════════════════════════════════════════════════════
