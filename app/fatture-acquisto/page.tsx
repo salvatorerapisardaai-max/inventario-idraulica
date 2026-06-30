@@ -1,10 +1,32 @@
 // =============================================================================
-//  app/fatture-acquisto/page.tsx — Pagina "Fatture di acquisto"
+//  app/fatture-acquisto/page.tsx — Pagina "Fatture di acquisto".
+//  Client Supabase inline.
 // =============================================================================
-import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import ImportaXml from './ImportaXml';
 
 export const dynamic = 'force-dynamic';
+
+async function getSupabase() {
+  const cookieStore = await cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll(); },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            );
+          } catch {}
+        },
+      },
+    },
+  );
+}
 
 const STATI: Record<string, { label: string; cls: string }> = {
   ricevuta:     { label: 'Ricevuta',     cls: 'bg-blue-100 text-blue-700' },
@@ -17,7 +39,7 @@ const euro = (n: number | null) =>
   n == null ? '—' : new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
 
 export default async function FattureAcquistoPage() {
-  const supabase = await createClient();
+  const supabase = await getSupabase();
   const { data: fatture } = await supabase
     .from('fatture_acquisto')
     .select('id, numero, data, totale, stato, fornitore_nome_snapshot, fornitori(nome)')
