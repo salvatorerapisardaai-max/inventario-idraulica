@@ -9,7 +9,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { emettiFattura } from '@/lib/fattura/emettiFattura';
+import { emettiFattura } from '@/lib/fattura/generaXmlFattura';
 import { PersistenzaSupabase } from '@/lib/fattura/persistenzaSupabase';
 import { MockGateway } from '@/lib/fattura/gateway';
 // import { ArubaGateway } from '@/lib/fattura/arubaGateway'; // Passo 4
