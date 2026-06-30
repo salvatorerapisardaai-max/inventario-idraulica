@@ -60,7 +60,9 @@ export async function importaXmlAcquisto(xml: string): Promise<Esito> {
     .insert({
       fornitore_id: fornitoreId,
       fornitore_piva: p.cedente.partitaIva ?? null,
-      fornitore_nome_snapshot: p.cedente.denominazione ?? [p.cedente.nome, p.cedente.cognome].filter(Boolean).join(' ') || null,
+      fornitore_nome_snapshot:
+        p.cedente.denominazione ??
+        ([p.cedente.nome, p.cedente.cognome].filter(Boolean).join(' ') || null),
       numero: p.numero,
       data: p.data,
       tipo_documento: p.tipoDocumento ?? 'TD01',
