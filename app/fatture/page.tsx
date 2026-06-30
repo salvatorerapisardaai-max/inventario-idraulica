@@ -1,11 +1,32 @@
 // =============================================================================
 //  app/fatture/page.tsx — Pagina "Fatture" (server component).
-//  Mostra l'elenco con badge di stato + il riquadro per crearne una da vendita.
+//  Client Supabase inline (no helper esterno).
 // =============================================================================
-import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import NuovaFattura from './NuovaFattura';
 
 export const dynamic = 'force-dynamic';
+
+async function getSupabase() {
+  const cookieStore = await cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll(); },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            );
+          } catch {}
+        },
+      },
+    },
+  );
+}
 
 const STATI: Record<string, { label: string; cls: string }> = {
   bozza:      { label: 'Bozza',      cls: 'bg-gray-100 text-gray-700' },
@@ -19,7 +40,7 @@ const euro = (n: number | null) =>
   n == null ? '—' : new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n);
 
 export default async function FatturePage() {
-  const supabase = await createClient();
+  const supabase = await getSupabase();
 
   const { data: fatture } = await supabase
     .from('fatture')
@@ -29,7 +50,6 @@ export default async function FatturePage() {
   const { count: nAzienda } = await supabase
     .from('azienda').select('*', { count: 'exact', head: true });
 
-  // vendite non ancora fatturate
   const { data: vendite } = await supabase
     .from('vendite')
     .select('id, numero, data, totale, cliente_nome, cliente_id')
