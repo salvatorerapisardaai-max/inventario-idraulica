@@ -184,7 +184,7 @@ export default function InventarioApp() {
     { id:'vendita', label:'💰 Vendita' },
     { id:'prenotazioni', label:`📅 Prenotazioni${prenotazioniAttive>0?` (${prenotazioniAttive})`:''}` },
     { id:'storico', label:`📋 Storico (${vendite.length})` },
-    { id:'fatture', label:'📄 Fatture' },
+    { id:'fatture', label:'📄 Export CSV' },
     { id:'spese', label:`💸 Spese` },
     { id:'aggiungi', label:'+ Aggiungi' },
     { id:'fornitori', label:`Fornitori (${fornitori.length})` },
