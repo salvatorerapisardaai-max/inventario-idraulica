@@ -1,12 +1,17 @@
 // =============================================================================
 //  app/fatture/NuovaFattura.tsx — riquadro client per creare una fattura.
-//  Sceglie una vendita e chiama la Server Action. Aggiorna la lista al successo.
+//  Stile inline coerente con InventarioApp.tsx.
 // =============================================================================
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { emettiFatturaDaVendita } from './azioni';
+
+const C = { surface:'#1a1a1a', border:'#2a2a2a', text:'#e8e8e8', muted:'#888', accent:'#3b82f6', green:'#22c55e', red:'#ef4444', orange:'#f97316' };
+
+const inp: CSSProperties = { padding:'9px 11px', background:C.surface, border:`1px solid ${C.border}`, borderRadius:5, color:C.text, fontSize:13, fontFamily:'inherit', outline:'none' };
+const btnPrimary: CSSProperties = { padding:'10px 18px', background:C.accent, color:'#fff', border:'none', borderRadius:5, fontSize:12, fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase', cursor:'pointer', fontFamily:'inherit' };
 
 interface VenditaOpt {
   id: string;
@@ -52,11 +57,11 @@ export default function NuovaFattura({
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
-      <h2 className="text-sm font-medium text-gray-700 mb-2">Crea fattura da una vendita</h2>
-      <div className="flex flex-wrap items-center gap-2">
+    <div style={{ borderRadius:10, border:`1px solid ${C.border}`, background:C.surface, padding:16 }}>
+      <h2 style={{ margin:'0 0 10px', fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em' }}>Crea fattura da una vendita</h2>
+      <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:8 }}>
         <select
-          className="min-w-[18rem] rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          style={{ ...inp, minWidth:280, cursor:'pointer' }}
           value={sel}
           onChange={(e) => setSel(e.target.value)}
           disabled={disabilitato || pending}
@@ -71,20 +76,20 @@ export default function NuovaFattura({
         <button
           onClick={genera}
           disabled={disabilitato || pending || !sel}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          style={{ ...btnPrimary, opacity: (disabilitato || pending || !sel) ? 0.5 : 1 }}
         >
           {pending ? 'Genero…' : 'Genera fattura'}
         </button>
       </div>
 
       {disabilitato && (
-        <p className="mt-2 text-xs text-amber-700">Configura prima i dati azienda.</p>
+        <p style={{ margin:'8px 0 0', fontSize:12, color:C.orange }}>Configura prima i dati azienda.</p>
       )}
       {vendite.length === 0 && !disabilitato && (
-        <p className="mt-2 text-xs text-gray-500">Nessuna vendita disponibile da fatturare.</p>
+        <p style={{ margin:'8px 0 0', fontSize:12, color:C.muted }}>Nessuna vendita disponibile da fatturare.</p>
       )}
       {msg && (
-        <p className={`mt-2 text-sm ${msg.tipo === 'ok' ? 'text-green-700' : 'text-red-700'}`}>
+        <p style={{ margin:'8px 0 0', fontSize:13, color: msg.tipo === 'ok' ? C.green : C.red }}>
           {msg.testo}
         </p>
       )}
